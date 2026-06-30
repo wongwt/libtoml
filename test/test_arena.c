@@ -209,19 +209,17 @@ static void test_strdup_overflowing_length_returns_null(void) {
     arena_free(&arena);
 }
 
-static void test_init_with_zero_chunk_size(void) {
+static void test_init_with_zero_chunk_size_defaults_to_arena_chunk_size(void) {
     arena_s arena;
     arena_init(&arena, 0);
 
     EXPECT(arena.head == NULL);
-    EXPECT(arena.chunk_size == 0);
+    EXPECT(arena.chunk_size == ARENA_CHUNK_SIZE);
 
-    // First allocation still creates a usable chunk, sized off the
-    // request rather than the (zero) configured chunk_size
     void *p = arena_alloc(&arena, 8);
     EXPECT(p != NULL);
     EXPECT(arena.head != NULL);
-    EXPECT(arena.head->capacity == 16);  // max(2 * 8, 0)
+    EXPECT(arena.head->capacity == ARENA_CHUNK_SIZE);  // max(2 * 8, ARENA_CHUNK_SIZE)
 
     arena_free(&arena);
 }
@@ -249,11 +247,12 @@ static void test_alloc_zero_size(void) {
 }
 
 static void test_alloc_zero_size_on_empty_arena_creates_chunk(void) {
-    arena_s arena;
-    arena_init(&arena, 0);
-
-    // Even chunk_size == 0 and size == 0 must still produce a valid
+    // Bypass arena_init() (which now defaults chunk_size == 0 to
+    // ARENA_CHUNK_SIZE) to exercise arena_alloc()/arena_expand() directly
+    // under a true chunk_size == 0, confirming they still produce a valid
     // (zero-capacity) chunk rather than leaving arena.head dangling
+    arena_s arena = {.head = NULL, .chunk_size = 0};
+
     void *p = arena_alloc(&arena, 0);
     EXPECT(p != NULL);
     EXPECT(arena.head != NULL);
@@ -279,7 +278,7 @@ int main(void) {
     test_null_arena_arguments_are_safe();
     test_alloc_overflowing_size_returns_null();
     test_strdup_overflowing_length_returns_null();
-    test_init_with_zero_chunk_size();
+    test_init_with_zero_chunk_size_defaults_to_arena_chunk_size();
     test_alloc_zero_size();
     test_alloc_zero_size_on_empty_arena_creates_chunk();
 
