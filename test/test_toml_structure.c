@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "toml.h"
+#include "toml.c"
 
 static int total = 0;
 static int fails = 0;

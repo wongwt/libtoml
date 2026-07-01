@@ -61,10 +61,10 @@ uninstall:
 test: $(TEST_BINS)
 
 $(BUILD_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.c | $(BUILD_DIR)/$(TEST_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) -Wno-unused-function -c $< -o $@
 
-$(BUILD_DIR)/$(TEST_DIR)/%: $(BUILD_DIR)/$(TEST_DIR)/%.o $(LIB)
-	$(CC) $(CFLAGS) $(LDFLAGS) $< $(LIB) -o $@
+$(BUILD_DIR)/$(TEST_DIR)/%: $(BUILD_DIR)/$(TEST_DIR)/%.o
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
 
 $(BUILD_DIR)/$(SRC_DIR) $(BUILD_DIR)/$(TEST_DIR):
 	mkdir -p $@
