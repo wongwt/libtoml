@@ -41,11 +41,11 @@ the most recent operation.
 ## Building
 
 ````sh
-make                # Release static library
-make test           # Unit tests + toml-test
-make test-cppcheck  # cppcheck static analysis
-make test-san       # Same, under AddressSanitizer + UBSan
-make test-valgrind  # Same, under valgrind
+make                 # Release static library
+make test            # Unit tests + toml-test
+make test-cppcheck   # cppcheck static analysis
+make test-sanitize   # Same, under AddressSanitizer + UBSan
+make test-valgrind   # Same, under valgrind
 ````
 
 Requirements: a C99 compiler and POSIX environment. `gcc` and `clang` are
@@ -66,10 +66,10 @@ Progress dashboard: toml-test pass count. Milestones in order, M0 through M8.
 - [x] M0.4 Test runner: single `make test` entry point discovering and
       running `test/test_*.c`; toml-test wiring deferred to M1/M2 (a
       pinned Go install, not vendored); skip-list mechanism
-- [x] M0.5 Targets: `test`, `test-cppcheck`, `test-san`, `test-valgrind`;
+- [x] M0.5 Targets: `test`, `test-cppcheck`, `test-sanitize`, `test-valgrind`;
       `-Wall -Wextra -Werror`
-- [ ] M0.6 GitHub Actions quick CI: test + test-cppcheck + test-san +
-      skip-check on push
+- [x] M0.6 GitHub Actions quick CI: test + test-cppcheck + test-sanitize on
+      push (`skip-check` joins the workflow once M3.3 lands)
 
 ### M1 — Core dialect vertical slice
 - [ ] M1.1 Lexer: bare keys, `=`, escape-free single-line basic

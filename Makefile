@@ -75,9 +75,9 @@ test-cppcheck:
 		--suppressions-list=cppcheck-suppressions.txt --inline-suppr \
 		$(srcdir)
 
-.PHONY: test-san
-test-san: CFLAGS = -std=c99 -O0 -g3 -Wall -Wextra -Werror $(SANFLAGS)
-test-san: $(SANTESTBINS)
+.PHONY: test-sanitize
+test-sanitize: CFLAGS = -std=c99 -O0 -g3 -Wall -Wextra -Werror $(SANFLAGS)
+test-sanitize: $(SANTESTBINS)
 	@$(call run_tests,$(SANTESTBINS),ASAN_OPTIONS=detect_stack_use_after_return=1)
 
 $(testdir)/test_%.san: $(testdir)/test_%.c $(SRCS) $(HDRS)
