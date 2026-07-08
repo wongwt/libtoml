@@ -22,50 +22,43 @@
 // TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-#include "toml.h"
+#include "../src/toml.c"
 
+#include <stdio.h>
 #include <stdlib.h>
 
-typedef struct {
-    toml_errcode_e code;
-    toml_span_s primary;
-    toml_span_s secondary;
-    const char *detail;
-} toml_error_s;
+static int pass_count = 0;
+static int fail_count = 0;
 
-struct toml {
-    toml_error_s error;
-};
+#define EXPECT(cond) \
+    do { \
+        if (cond) { \
+            pass_count++; \
+        } else { \
+            fail_count++; \
+            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+        } \
+    } while (0)
 
-// TEMP: malloc/free stand in for `arena_alloc()` until the arena lands
-// in M0.3. The document handle will become the arena's first allocation
-toml_t *toml_from_byte(const char *byte, size_t byte_len) {
-    (void)byte;
-    (void)byte_len;
-
-    toml_t *toml = malloc(sizeof *toml);
-    if (toml == NULL) {
-        return NULL;
-    }
-
-    toml->error.code = TOML_OK;
-    toml->error.primary.ptr = NULL;
-    toml->error.primary.len = 0;
-    toml->error.secondary.ptr = NULL;
-    toml->error.secondary.len = 0;
-    toml->error.detail = NULL;
-
-    return toml;
+static void test_has_error_null_is_safe_and_true(void) {
+    EXPECT(toml_has_error(NULL) == true);
 }
 
-void toml_free(toml_t *toml) {
-    free(toml);
+static void test_from_str_returns_usable_handle(void) {
+    const char *source = "answer = 42\n";
+    toml_t *toml = toml_from_byte(source, 12);
+
+    EXPECT(toml != NULL);
+    EXPECT(toml_has_error(toml) == false);
+
+    toml_free(toml);
 }
 
-bool toml_has_error(const toml_t *toml) {
-    if (toml == NULL) {
-        return true;
-    }
+int main(void) {
+    test_has_error_null_is_safe_and_true();
+    test_from_str_returns_usable_handle();
 
-    return toml->error.code != TOML_OK;
+    printf("%d passed, %d failed\n", pass_count, fail_count);
+
+    return (fail_count == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

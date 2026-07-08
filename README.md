@@ -10,7 +10,7 @@ C11/C23 syntax sugar. MIT licensed.
 ````c
 #include "toml.h"
 
-toml_t *toml = toml_from_str(str, str_len);
+toml_t *toml = toml_from_byte(byte, byte_len);
 
 // `toml_has_error()` covers every failure mode, including a NULL handle
 if (toml_has_error(toml)) {
@@ -23,10 +23,10 @@ int64_t port = toml_get_s64_or(toml, "server.port", 8080);
 bool debug = toml_get_bool_or(toml, "debug", false);
 
 // Guaranteed non-NULL: safe to pass straight into `printf()`
-printf("host = %s\n", toml_get_cstr_or(toml, "server.host", "(unset)"));
+printf("host = %s\n", toml_get_str_or(toml, "server.host", "(unset)"));
 
 // Plain getters return NULL/failure and the handle explains why
-const char *token = toml_get_cstr(toml, "auth.token");
+const char *token = toml_get_str(toml, "auth.token");
 if (token == NULL) {
     toml_err_print(toml);
 }
@@ -57,7 +57,7 @@ Progress dashboard: toml-test pass count. Milestones in order, M0 through M8.
 
 ### M0 — Foundation
 - [x] M0.1 Repo skeleton: `toml.c`, `toml.h`, LICENSE (MIT), Makefile
-- [ ] M0.2 Public API signatures stubbed: `toml_from_str()`, `toml_t`
+- [x] M0.2 Public API signatures stubbed: `toml_from_byte()`, `toml_t`
       handle, sticky `{code, span}` error + `toml_has_error()`,
       `toml_free()`, getter family declarations
 - [ ] M0.3 Bump allocator `arena_alloc()` with OOM path and alignment;
@@ -92,8 +92,8 @@ Progress dashboard: toml-test pass count. Milestones in order, M0 through M8.
 - [ ] M2.2 Literal strings; multiline basic/literal (first-newline
       trim, line-ending backslash)
 - [ ] M2.3 Floats (inf/nan/exponent/underscores); integer bases
-- [ ] M2.4 `toml_get_cstr()` lazy materialization + cache flag;
-      `toml_get_cstr_or()` non-NULL guarantee
+- [ ] M2.4 `toml_get_str()` lazy materialization + cache flag;
+      `toml_get_str_or()` non-NULL guarantee
 - [ ] M2.5 Datetime (all four kinds)
 - [ ] M2.6 Arrays (nested, multiline, 1.0 comma rules);
       `toml_array_len()`
@@ -113,7 +113,7 @@ Progress dashboard: toml-test pass count. Milestones in order, M0 through M8.
 - [ ] **Gate: toml-test v1.1 at 100 percent**
 
 ### M4 — Schema mapping
-- [ ] M4.1 `toml_field_t` descriptors; flat `toml_map()` for s64, f64,
+- [ ] M4.1 `toml_field_s` descriptors; flat `toml_map()` for s64, f64,
       bool, string-buffer, string-view; required/defaults
 - [ ] M4.2 Constraints: min/max; buffer overflow is an error; failures
       carry value spans

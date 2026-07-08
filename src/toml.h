@@ -25,12 +25,90 @@
 #ifndef LIBTOML_H
 #define LIBTOML_H
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#endif  // LIBTOML_H
+//! Opaque TOML document handle
+typedef struct toml toml_t;
+
+//! A byte range into either the immutable source buffer or the arena
+typedef struct {
+    const char *ptr; //!< First byte of the range
+    size_t len; //!< Number of bytes in the range
+} toml_span_s;
+
+//! TOML error codes
+typedef enum {
+    TOML_OK = 0 //!< No error
+} toml_errcode_e;
+
+//! Create TOML document from a byte buffer
+//!
+//! @param[in]  byte      Source bytes; need not be NUL-terminated
+//! @param[in]  byte_len  Number of bytes in the source
+//! @retval  NULL  The buffer cannot hold the document header
+//! @return  TOML document handle
+toml_t *toml_from_byte(const char *byte, size_t byte_len);
+
+//! Tear down a TOML document handle
+//!
+//! @param[in]  toml  The handle to destroy, or `NULL` (ignored)
+void toml_free(toml_t *toml);
+
+//! Report whether the most recent operation failed
+//!
+//! @param[in]  toml  The handle to inspect, or `NULL`
+//! @retval  true   The most recent operation failed, or the handle is `NULL`
+//! @retval  false  The most recent operation succeeded
+bool toml_has_error(const toml_t *toml);
+
+//! Retrieve an integer value or return a fallback
+//!
+//! @param[in]  toml     TOML document handle
+//! @param[in]  path     Dotted path to the value
+//! @param[in]  def_val  Fallback when the path is absent
+//! @return  The value at the path, or the fallback if absent
+int64_t toml_get_s64_or(const toml_t *toml, const char *path, int64_t def_val);
+
+//! Retrieve a floating-point value or return a fallback
+//!
+//! @param[in]  toml     TOML document handle
+//! @param[in]  path     Dotted path to the value
+//! @param[in]  def_val  Fallback when the path is absent
+//! @return  The value at the path, or the fallback if absent
+double toml_get_f64_or(const toml_t *toml, const char *path, double def_val);
+
+//! Retrieve a boolean value or return a fallback
+//!
+//! @param[in]  toml     TOML document handle
+//! @param[in]  path     Dotted path to the value
+//! @param[in]  def_val  Fallback used when the path is absent
+//! @return  The value at the path, or the fallback if absent
+bool toml_get_bool_or(const toml_t *toml, const char *path, bool def_val);
+
+//! Retrieve a NUL-terminated string value or return a fallback
+//!
+//! @param[in]  toml     TOML document handle
+//! @param[in]  path     Dotted path to the value
+//! @param[in]  def_val  Fallback used when the path is absent
+//! @return  The value at the path, or the fallback if absent
+const char *toml_get_str_or(const toml_t *toml, const char *path, const char *def_val);
+
+//! Retrieve a NUL-terminated string value
+//!
+//! @param[in]  toml  TOML document handle
+//! @param[in]  path  Dotted path to the value
+//! @retval  NULL  The path is absent or holds the wrong type
+//! @return  The value at the path
+const char *toml_get_str(const toml_t *toml, const char *path);
 
 #ifdef __cplusplus
 }
 #endif
+
+#endif // LIBTOML_H
