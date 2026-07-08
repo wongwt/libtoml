@@ -56,7 +56,7 @@ automatically and always have C99 fallbacks.
 Progress dashboard: toml-test pass count. Milestones in order, M0 through M8.
 
 ### M0 — Foundation
-- [ ] M0.1 Repo skeleton: `toml.c`, `toml.h`, LICENSE (MIT), Makefile
+- [x] M0.1 Repo skeleton: `toml.c`, `toml.h`, LICENSE (MIT), Makefile
 - [ ] M0.2 Public API signatures stubbed: `toml_from_str()`, `toml_t`
       handle, sticky `{code, span}` error + `toml_has_error()`,
       `toml_free()`, getter family declarations
