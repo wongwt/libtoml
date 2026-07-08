@@ -94,7 +94,7 @@ double toml_get_f64_or(const toml_t *toml, const char *path, double def_val);
 //!
 //! @param[in]  toml     TOML document handle
 //! @param[in]  path     Dotted path to the value
-//! @param[in]  def_val  Fallback used when the path is absent
+//! @param[in]  def_val  Fallback when the path is absent
 //! @return  The value at the path, or the fallback if absent
 bool toml_get_bool_or(const toml_t *toml, const char *path, bool def_val);
 
@@ -102,7 +102,7 @@ bool toml_get_bool_or(const toml_t *toml, const char *path, bool def_val);
 //!
 //! @param[in]  toml     TOML document handle
 //! @param[in]  path     Dotted path to the value
-//! @param[in]  def_val  Fallback used when the path is absent
+//! @param[in]  def_val  Fallback when the path is absent
 //! @return  The value at the path, or the fallback if absent
 const char *toml_get_str_or(const toml_t *toml, const char *path, const char *def_val);
 
