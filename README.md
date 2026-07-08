@@ -62,8 +62,9 @@ Progress dashboard: toml-test pass count. Milestones in order, M0 through M8.
       `toml_free()`, getter family declarations
 - [x] M0.3 Bump allocator `arena_alloc()` with OOM path and alignment;
       unit tests include a 16-byte-buffer OOM test
-- [ ] M0.4 Test runner: single entry point, unit tests + vendored
-      toml-test corpus, skip-list mechanism
+- [x] M0.4 Test runner: single `make test` entry point discovering and
+      running `test/test_*.c`; toml-test wiring deferred to M1/M2 (a
+      pinned Go install, not vendored); skip-list mechanism
 - [ ] M0.5 Targets: `test`, `test-san`, `test-valgrind`, `check`;
       `-Wall -Wextra -Werror`
 - [ ] M0.6 GitHub Actions quick CI: check + test + test-san +

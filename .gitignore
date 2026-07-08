@@ -53,3 +53,7 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# Test binaries
+test/test_*
+!test/test_*.c
