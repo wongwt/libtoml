@@ -29,6 +29,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// C11 support
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#define TOML_HAS_C11 1
+#else
+#define TOML_HAS_C11 0
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -3,7 +3,7 @@ AR ?= ar
 ARFLAGS = rcs
 RM ?= rm -f
 
-CFLAGS ?= -std=c99 -O2 -Wall -Wextra -Werror
+CFLAGS ?= -std=c99 -O2 -DNDEBUG -Wall -Wextra -Werror
 
 srcdir = src
 
@@ -21,7 +21,7 @@ all: $(LIB)
 $(LIB): $(OBJS)
 	$(AR) $(ARFLAGS) $@ $^
 
-$(DBGLIB): CFLAGS = -std=c99 -O0 -g3 -DTOML_DEBUG -Wall -Wextra -Werror
+$(DBGLIB): CFLAGS = -std=c99 -O0 -g3 -Wall -Wextra -Werror
 $(DBGLIB): $(DBGOBJS)
 	$(AR) $(ARFLAGS) $@ $^
 

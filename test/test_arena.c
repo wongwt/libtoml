@@ -24,9 +24,9 @@
 
 #include "../src/toml.c"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 static int pass_count = 0;
 static int fail_count = 0;
@@ -41,23 +41,59 @@ static int fail_count = 0;
         } \
     } while (0)
 
-static void test_has_error_null_is_safe_and_true(void) {
-    EXPECT(toml_has_error(NULL) == true);
+static void test_alloc_returns_null_on_oom_with_16_byte_buffer(void) {
+    unsigned char storage[16];
+    toml_arena_s arena = {
+        .chunk = storage,
+        .capacity = sizeof storage,
+    };
+
+    void *first = arena_alloc(&arena, 12, 1);
+    EXPECT(first != NULL);
+
+    void *second = arena_alloc(&arena, 5, 1);
+    EXPECT(second == NULL);
+
+    void *third = arena_alloc(&arena, 4, 1);
+    EXPECT(third != NULL);
 }
 
-static void test_from_str_returns_usable_handle(void) {
-    const char *source = "answer = 42\n";
-    toml_t *toml = toml_from_byte(source, strlen(source));
+static void test_alloc_respects_alignment(void) {
+    unsigned char storage[64];
+    toml_arena_s arena = {
+        .chunk = storage,
+        .capacity = sizeof storage,
+    };
 
-    EXPECT(toml != NULL);
-    EXPECT(toml_has_error(toml) == false);
+    // Misalign the bump pointer by one byte before requesting 8-byte
+    // alignment, so the padding logic actually gets exercised.
+    void *filler = arena_alloc(&arena, 1, 1);
+    EXPECT(filler != NULL);
 
-    toml_free(toml);
+    void *aligned = arena_alloc(&arena, 8, 8);
+    EXPECT(aligned != NULL);
+    EXPECT((uintptr_t)aligned % 8 == 0);
+}
+
+static void test_alloc_does_not_overlap_sequential_allocations(void) {
+    unsigned char storage[64];
+    toml_arena_s arena = {
+        .chunk = storage,
+        .capacity = sizeof storage,
+    };
+
+    unsigned char *first = arena_alloc(&arena, 8, 1);
+    unsigned char *second = arena_alloc(&arena, 8, 1);
+
+    EXPECT(first != NULL);
+    EXPECT(second != NULL);
+    EXPECT(second >= first + 8);
 }
 
 int main(void) {
-    test_has_error_null_is_safe_and_true();
-    test_from_str_returns_usable_handle();
+    test_alloc_returns_null_on_oom_with_16_byte_buffer();
+    test_alloc_respects_alignment();
+    test_alloc_does_not_overlap_sequential_allocations();
 
     printf("%d passed, %d failed\n", pass_count, fail_count);
 

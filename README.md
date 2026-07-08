@@ -60,7 +60,7 @@ Progress dashboard: toml-test pass count. Milestones in order, M0 through M8.
 - [x] M0.2 Public API signatures stubbed: `toml_from_byte()`, `toml_t`
       handle, sticky `{code, span}` error + `toml_has_error()`,
       `toml_free()`, getter family declarations
-- [ ] M0.3 Bump allocator `arena_alloc()` with OOM path and alignment;
+- [x] M0.3 Bump allocator `arena_alloc()` with OOM path and alignment;
       unit tests include a 16-byte-buffer OOM test
 - [ ] M0.4 Test runner: single entry point, unit tests + vendored
       toml-test corpus, skip-list mechanism

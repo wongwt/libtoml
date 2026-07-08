@@ -24,7 +24,47 @@
 
 #include "toml.h"
 
+#include <assert.h>
 #include <stdlib.h>
+
+#if TOML_HAS_C11
+#define ALIGNOF(type) _Alignof(type)
+#else
+#define ALIGNOF(type) offsetof(struct { char byte; type value; }, value)
+#endif
+
+// One chunk for now; the chunked dynamic backend arriving in M7 reuses
+// this same size per chunk
+static const size_t ARENA_CHUNK_SIZE = 4096;
+
+typedef struct {
+    unsigned char *chunk;
+    size_t capacity;
+    size_t offset;
+} toml_arena_s;
+
+static size_t align_to(size_t value, size_t align) {
+    assert(align > 0 && (align & (align - 1)) == 0);
+
+    return (value + align - 1) & ~(align - 1);
+}
+
+static void *arena_alloc(toml_arena_s *arena, size_t size, size_t align) {
+    size_t aligned_offset = align_to(arena->offset, align);
+
+    if (aligned_offset > arena->capacity) {
+        return NULL;
+    }
+
+    if (size > arena->capacity - aligned_offset) {
+        return NULL;
+    }
+
+    void *ptr = arena->chunk + aligned_offset;
+    arena->offset = aligned_offset + size;
+
+    return ptr;
+}
 
 typedef struct {
     toml_errcode_e code;
@@ -34,32 +74,42 @@ typedef struct {
 } toml_error_s;
 
 struct toml {
+    toml_arena_s arena;
     toml_error_s error;
 };
 
-// TEMP: malloc/free stand in for `arena_alloc()` until the arena lands
-// in M0.3. The document handle will become the arena's first allocation
 toml_t *toml_from_byte(const char *byte, size_t byte_len) {
     (void)byte;
     (void)byte_len;
 
-    toml_t *toml = malloc(sizeof *toml);
-    if (toml == NULL) {
+    unsigned char *chunk = malloc(ARENA_CHUNK_SIZE);
+    if (chunk == NULL) {
         return NULL;
     }
 
-    toml->error.code = TOML_OK;
-    toml->error.primary.ptr = NULL;
-    toml->error.primary.len = 0;
-    toml->error.secondary.ptr = NULL;
-    toml->error.secondary.len = 0;
-    toml->error.detail = NULL;
+    toml_arena_s arena = {
+        .chunk = chunk,
+        .capacity = ARENA_CHUNK_SIZE,
+    };
+
+    toml_t *toml = arena_alloc(&arena, sizeof *toml, ALIGNOF(toml_t));
+    if (toml == NULL) {
+        free(chunk);
+        return NULL;
+    }
+
+    toml->arena = arena;
+    toml->error = (toml_error_s){ .code = TOML_OK };
 
     return toml;
 }
 
 void toml_free(toml_t *toml) {
-    free(toml);
+    if (toml == NULL) {
+        return;
+    }
+
+    free(toml->arena.chunk);
 }
 
 bool toml_has_error(const toml_t *toml) {
