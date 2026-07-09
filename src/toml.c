@@ -295,6 +295,10 @@ typedef enum {
 } toml_type_e;
 
 typedef struct {
+    // `entries` is written by finalize_table() and read today only by
+    // tests via white-box access; the serializer (M1.4) / access API
+    // (M1.5) add a real production reader
+    // cppcheck-suppress unusedStructMember
     struct toml_node **entries;
     size_t count;
 } toml_table_s;
@@ -470,10 +474,54 @@ static const toml_node_s *find_duplicate(const toml_node_s *head, toml_span_s ke
     return NULL;
 }
 
-static toml_node_s *make_table_node(toml_t *toml, node_list_s entries) {
+static bool finalize_table(toml_t *toml, node_list_s entries, toml_table_s *out) {
     toml_node_s **index = create_index(&toml->arena, entries.head, entries.count);
     if (index == NULL) {
         make_error(toml, TOML_ERR_NOMEM, EMPTY_SPAN, EMPTY_SPAN);
+        return false;
+    }
+
+    *out = (toml_table_s){ .entries = index, .count = entries.count };
+    return true;
+}
+
+static toml_node_s *make_table_node(toml_t *toml, node_list_s entries) {
+    toml_table_s table;
+    if (!finalize_table(toml, entries, &table)) {
+        return NULL;
+    }
+
+    toml_node_s *node = arena_alloc(&toml->arena, sizeof *node, ALIGNOF(toml_node_s));
+    if (node == NULL) {
+        make_error(toml, TOML_ERR_NOMEM, EMPTY_SPAN, EMPTY_SPAN);
+        return NULL;
+    }
+
+    *node = (toml_node_s){ .type = TOML_TABLE, .val.t = table };
+    return node;
+}
+
+static toml_node_s *parse_table_header(toml_t *toml, lexer_s *lexer, node_list_s *root_entries) {
+    toml_span_s name = parse_key(toml, lexer_next(lexer));
+    if (toml_has_error(toml)) {
+        return NULL;
+    }
+
+    token_s close_token = lexer_next(lexer);
+    if (close_token.type != TOKEN_RBRACKET) {
+        make_error(toml, TOML_ERR_SYNTAX, close_token.text, EMPTY_SPAN);
+        return NULL;
+    }
+
+    token_s after_token = lexer_next(lexer);
+    if (after_token.type != TOKEN_NEWLINE && after_token.type != TOKEN_EOF) {
+        make_error(toml, TOML_ERR_SYNTAX, after_token.text, EMPTY_SPAN);
+        return NULL;
+    }
+
+    const toml_node_s *dup = find_duplicate(root_entries->head, name);
+    if (dup != NULL) {
+        make_error(toml, TOML_ERR_DUP_KEY, name, dup->key);
         return NULL;
     }
 
@@ -483,16 +531,16 @@ static toml_node_s *make_table_node(toml_t *toml, node_list_s entries) {
         return NULL;
     }
 
-    *table = (toml_node_s){
-        .type = TOML_TABLE,
-        .val.t = { .entries = index, .count = entries.count },
-    };
+    *table = (toml_node_s){ .type = TOML_TABLE, .key = name };
+    node_list_append(root_entries, table);
 
     return table;
 }
 
 static toml_node_s *parse_toml(toml_t *toml, lexer_s *lexer) {
-    node_list_s entries = { 0 };
+    node_list_s root_entries = { 0 };
+    node_list_s cur_entries = { 0 };
+    toml_node_s *cur_table = NULL;  // NULL while collecting the root's own body
 
     token_s token = lexer_next(lexer);
 
@@ -501,8 +549,25 @@ static toml_node_s *parse_toml(toml_t *toml, lexer_s *lexer) {
             token = lexer_next(lexer);
         }
 
-        if (token.type == TOKEN_EOF) {
-            break;
+        if (token.type == TOKEN_EOF || token.type == TOKEN_LBRACKET) {
+            if (cur_table == NULL) {
+                root_entries = cur_entries;
+            } else if (!finalize_table(toml, cur_entries, &cur_table->val.t)) {
+                return NULL;
+            }
+
+            if (token.type == TOKEN_EOF) {
+                break;
+            }
+
+            cur_table = parse_table_header(toml, lexer, &root_entries);
+            if (cur_table == NULL) {
+                return NULL;
+            }
+
+            cur_entries = (node_list_s){ 0 };
+            token = lexer_next(lexer);
+            continue;
         }
 
         toml_node_s *entry = parse_keyval(toml, lexer, token);
@@ -510,13 +575,13 @@ static toml_node_s *parse_toml(toml_t *toml, lexer_s *lexer) {
             return NULL;
         }
 
-        const toml_node_s *dup = find_duplicate(entries.head, entry->key);
+        const toml_node_s *dup = find_duplicate(cur_entries.head, entry->key);
         if (dup != NULL) {
             make_error(toml, TOML_ERR_DUP_KEY, entry->key, dup->key);
             return NULL;
         }
 
-        node_list_append(&entries, entry);
+        node_list_append(&cur_entries, entry);
 
         token = lexer_next(lexer);
         if (token.type != TOKEN_NEWLINE && token.type != TOKEN_EOF) {
@@ -525,13 +590,11 @@ static toml_node_s *parse_toml(toml_t *toml, lexer_s *lexer) {
         }
     }
 
-    return make_table_node(toml, entries);
+    return make_table_node(toml, root_entries);
 }
 
 toml_t *toml_from_byte(const char *byte, size_t byte_len) {
-    size_t min_size = sizeof(toml_t) + ALIGNOF(toml_t) + byte_len + 1 + ARENA_CHUNK_SIZE;
-    size_t chunk_size = min_size > ARENA_CHUNK_SIZE ? min_size : ARENA_CHUNK_SIZE;
-
+    size_t chunk_size = sizeof(toml_t) + ALIGNOF(toml_t) + byte_len + 1 + ARENA_CHUNK_SIZE;
     unsigned char *chunk = malloc(chunk_size);
     if (chunk == NULL) {
         return NULL;

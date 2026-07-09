@@ -23,10 +23,8 @@
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 // Unit tests for the parser: parse_key(), parse_val(), parse_keyval(),
-// and parse_toml() at the root level. `[table]` headers are
-// intentionally out of scope here (a follow-up checkpoint); a leading
-// '[' is expected to fall through to parse_key()'s existing rejection
-// and report TOML_ERR_SYNTAX.
+// parse_table_header(), and parse_toml(), including `[table]` sections
+// and duplicate-key/duplicate-table-name detection.
 
 #include "../src/toml.c"
 
@@ -361,11 +359,145 @@ static void test_parse_toml_trailing_garbage_after_value_is_syntax_error(void) {
     toml_free(toml);
 }
 
-// `[table]` support is a follow-up checkpoint; for now this must fail
-// cleanly rather than be silently mishandled
-static void test_parse_toml_table_header_not_yet_supported(void) {
+static void test_parse_toml_table_with_one_entry(void) {
+    toml_t *toml = toml_from_byte("", 0);
+    lexer_s lexer = make_lexer("[server]\nport = 80\n");
+
+    toml_node_s *root = parse_toml(toml, &lexer);
+
+    EXPECT(root != NULL);
+    EXPECT(toml_has_error(toml) == false);
+    EXPECT(root->val.t.count == 1);
+
+    toml_node_s *server = root->val.t.entries[0];
+    EXPECT(span_eq(server->key, "server"));
+    EXPECT(server->type == TOML_TABLE);
+    EXPECT(server->val.t.count == 1);
+    EXPECT(span_eq(server->val.t.entries[0]->key, "port"));
+    EXPECT(server->val.t.entries[0]->val.s64 == 80);
+
+    toml_free(toml);
+}
+
+static void test_parse_toml_empty_table(void) {
     toml_t *toml = toml_from_byte("", 0);
     lexer_s lexer = make_lexer("[server]\n");
+
+    toml_node_s *root = parse_toml(toml, &lexer);
+
+    EXPECT(root != NULL);
+    EXPECT(toml_has_error(toml) == false);
+    EXPECT(root->val.t.count == 1);
+    EXPECT(root->val.t.entries[0]->type == TOML_TABLE);
+    EXPECT(root->val.t.entries[0]->val.t.count == 0);
+
+    toml_free(toml);
+}
+
+static void test_parse_toml_root_keys_then_table(void) {
+    toml_t *toml = toml_from_byte("", 0);
+    lexer_s lexer = make_lexer("a = 1\n[server]\nport = 80\n");
+
+    toml_node_s *root = parse_toml(toml, &lexer);
+
+    EXPECT(root != NULL);
+    EXPECT(toml_has_error(toml) == false);
+    EXPECT(root->val.t.count == 2);
+    EXPECT(span_eq(root->val.t.entries[0]->key, "a"));
+    EXPECT(root->val.t.entries[0]->type == TOML_S64);
+    EXPECT(span_eq(root->val.t.entries[1]->key, "server"));
+    EXPECT(root->val.t.entries[1]->type == TOML_TABLE);
+
+    toml_free(toml);
+}
+
+static void test_parse_toml_consecutive_tables(void) {
+    toml_t *toml = toml_from_byte("", 0);
+    lexer_s lexer = make_lexer("[a]\nx = 1\n[b]\ny = 2\n");
+
+    toml_node_s *root = parse_toml(toml, &lexer);
+
+    EXPECT(root != NULL);
+    EXPECT(toml_has_error(toml) == false);
+    EXPECT(root->val.t.count == 2);
+
+    toml_node_s *a = root->val.t.entries[0];
+    EXPECT(span_eq(a->key, "a"));
+    EXPECT(a->val.t.count == 1);
+    EXPECT(span_eq(a->val.t.entries[0]->key, "x"));
+    EXPECT(a->val.t.entries[0]->val.s64 == 1);
+
+    toml_node_s *b = root->val.t.entries[1];
+    EXPECT(span_eq(b->key, "b"));
+    EXPECT(b->val.t.count == 1);
+    EXPECT(span_eq(b->val.t.entries[0]->key, "y"));
+    EXPECT(b->val.t.entries[0]->val.s64 == 2);
+
+    toml_free(toml);
+}
+
+// Two consecutive empty tables: closing the first one's (empty) body
+// happens purely because the second '[' was seen, not because it had
+// any entries
+static void test_parse_toml_consecutive_empty_tables(void) {
+    toml_t *toml = toml_from_byte("", 0);
+    lexer_s lexer = make_lexer("[a]\n[b]\n");
+
+    toml_node_s *root = parse_toml(toml, &lexer);
+
+    EXPECT(root != NULL);
+    EXPECT(toml_has_error(toml) == false);
+    EXPECT(root->val.t.count == 2);
+    EXPECT(root->val.t.entries[0]->val.t.count == 0);
+    EXPECT(root->val.t.entries[1]->val.t.count == 0);
+
+    toml_free(toml);
+}
+
+static void test_parse_toml_duplicate_table_name(void) {
+    toml_t *toml = toml_from_byte("", 0);
+    lexer_s lexer = make_lexer("[server]\n[server]\n");
+
+    toml_node_s *root = parse_toml(toml, &lexer);
+
+    EXPECT(root == NULL);
+    EXPECT(toml_has_error(toml) == true);
+    EXPECT(toml->error.code == TOML_ERR_DUP_KEY);
+
+    toml_free(toml);
+}
+
+// A table name colliding with an already-defined top-level key is the
+// same kind of collision as two identical keys
+static void test_parse_toml_table_name_collides_with_existing_key(void) {
+    toml_t *toml = toml_from_byte("", 0);
+    lexer_s lexer = make_lexer("server = 1\n[server]\n");
+
+    toml_node_s *root = parse_toml(toml, &lexer);
+
+    EXPECT(root == NULL);
+    EXPECT(toml_has_error(toml) == true);
+    EXPECT(toml->error.code == TOML_ERR_DUP_KEY);
+
+    toml_free(toml);
+}
+
+static void test_parse_toml_table_header_missing_rbracket_is_syntax_error(void) {
+    toml_t *toml = toml_from_byte("", 0);
+    lexer_s lexer = make_lexer("[server\n");
+
+    toml_node_s *root = parse_toml(toml, &lexer);
+
+    EXPECT(root == NULL);
+    EXPECT(toml_has_error(toml) == true);
+    EXPECT(toml->error.code == TOML_ERR_SYNTAX);
+
+    toml_free(toml);
+}
+
+static void test_parse_toml_table_header_trailing_garbage_is_syntax_error(void) {
+    toml_t *toml = toml_from_byte("", 0);
+    lexer_s lexer = make_lexer("[server] extra\n");
 
     toml_node_s *root = parse_toml(toml, &lexer);
 
@@ -397,7 +529,15 @@ int main(void) {
     test_parse_toml_duplicate_key_reports_both_spans();
     test_parse_toml_syntax_error_missing_equal();
     test_parse_toml_trailing_garbage_after_value_is_syntax_error();
-    test_parse_toml_table_header_not_yet_supported();
+    test_parse_toml_table_with_one_entry();
+    test_parse_toml_empty_table();
+    test_parse_toml_root_keys_then_table();
+    test_parse_toml_consecutive_tables();
+    test_parse_toml_consecutive_empty_tables();
+    test_parse_toml_duplicate_table_name();
+    test_parse_toml_table_name_collides_with_existing_key();
+    test_parse_toml_table_header_missing_rbracket_is_syntax_error();
+    test_parse_toml_table_header_trailing_garbage_is_syntax_error();
 
     printf("%d passed, %d failed\n", pass_count, fail_count);
 

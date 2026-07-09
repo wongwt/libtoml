@@ -77,7 +77,7 @@ Progress dashboard: toml-test pass count. Milestones in order, M0 through M8.
       trivia spans; owned semantics with NUL sentinel
 - [x] M1.2 CST node finalized; intrusive child list + contiguous index
       backfill on container close
-- [ ] M1.3 Parser: key-value pairs, `[table]`, duplicate detection
+- [x] M1.3 Parser: key-value pairs, `[table]`, duplicate detection
       with spans
 - [ ] M1.4 Span-stitching serializer; **round-trip test
       `serialize(parse(x)) == x` goes live**
