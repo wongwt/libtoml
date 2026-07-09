@@ -34,14 +34,6 @@
 #define ALIGNOF(type) offsetof(struct { char byte; type value; }, value)
 #endif
 
-// Silences -Wunused-function for entry points with no production caller
-// yet; the M1.3 parser wires these in, at which point this goes away
-#if defined(__GNUC__) || defined(__clang__)
-#define TOML_NOT_YET_CALLED __attribute__((unused))
-#else
-#define TOML_NOT_YET_CALLED
-#endif
-
 // One chunk for now; the chunked dynamic backend arriving in M7 reuses
 // this same size per chunk
 static const size_t ARENA_CHUNK_SIZE = 4096;
@@ -103,10 +95,6 @@ typedef struct {
     const char *end;
 } lexer_s;
 
-// `source[len]` must be a readable sentinel byte other than '\n' (a
-// NUL terminator works). This lets lookahead like the CRLF check in
-// lexer_next() read one byte past `end` without a bounds check
-TOML_NOT_YET_CALLED
 static void lexer_init(lexer_s *lexer, const char *source, size_t len) {
     lexer->cur = source;
     lexer->end = source + len;
@@ -256,7 +244,6 @@ static token_s lexer_scan_str(lexer_s *lexer, toml_span_s leading) {
     return make_token(TOKEN_STR, head, lexer->cur, leading);
 }
 
-TOML_NOT_YET_CALLED
 static token_s lexer_next(lexer_s *lexer) {
     toml_span_s leading = lexer_scan_trivia(lexer);
 
@@ -326,7 +313,6 @@ typedef struct toml_node {
     struct toml_node *next;
 } toml_node_s;
 
-TOML_NOT_YET_CALLED
 static toml_node_s **create_index(toml_arena_s *arena, toml_node_s *head, size_t count) {
     size_t size  = count * sizeof(toml_node_s *);
     size_t align = ALIGNOF(toml_node_s *);
@@ -348,17 +334,202 @@ typedef struct {
     toml_errcode_e code;
     toml_span_s primary;
     toml_span_s secondary;
-    const char *detail;
 } toml_error_s;
 
 struct toml {
     toml_arena_s arena;
     toml_error_s error;
     toml_span_s source;  // Owned copy of the input, NUL-terminated
+    toml_node_s *root;
 };
 
+
+// TOML Parser
+
+static const toml_span_s EMPTY_SPAN = { 0 };
+
+static void make_error(toml_t *toml, toml_errcode_e code, toml_span_s primary, toml_span_s secondary) {
+    toml->error = (toml_error_s){
+        .code = code,
+        .primary = primary,
+        .secondary = secondary,
+    };
+}
+
+static bool spans_eq(toml_span_s a, toml_span_s b) {
+    return a.len == b.len && memcmp(a.ptr, b.ptr, a.len) == 0;
+}
+
+static toml_span_s parse_key(toml_t *toml, token_s token) {
+    switch (token.type) {
+        case TOKEN_BARE_KEY:
+        case TOKEN_S64:
+        case TOKEN_TRUE:
+        case TOKEN_FALSE:
+            return token.text;
+        default:
+            make_error(toml, TOML_ERR_SYNTAX, token.text, EMPTY_SPAN);
+            return EMPTY_SPAN;
+    }
+}
+
+#define S64_TEXT_BUF_SIZE 21
+
+static int64_t parse_s64_value(toml_span_s text) {
+    char buf[S64_TEXT_BUF_SIZE];
+
+    if (text.len >= sizeof(buf)) {
+        return text.ptr[0] == '-' ? INT64_MIN : INT64_MAX;
+    }
+
+    memcpy(buf, text.ptr, text.len);
+    buf[text.len] = '\0';
+
+    return strtoll(buf, NULL, 10);
+}
+
+static toml_node_s *parse_val(toml_t *toml, token_s token) {
+    toml_node_s *node = arena_alloc(&toml->arena, sizeof *node, ALIGNOF(toml_node_s));
+    if (node == NULL) {
+        make_error(toml, TOML_ERR_NOMEM, token.text, EMPTY_SPAN);
+        return NULL;
+    }
+
+    *node = (toml_node_s){ 0 };
+
+    switch (token.type) {
+        case TOKEN_STR:
+            node->type = TOML_STR;
+            node->val.byte = (toml_span_s){
+                .ptr = token.text.ptr + 1,
+                .len = token.text.len - 2,
+            };
+            return node;
+        case TOKEN_S64:
+            node->type = TOML_S64;
+            node->val.s64 = parse_s64_value(token.text);
+            return node;
+        case TOKEN_TRUE:
+            node->type = TOML_BOOL;
+            node->val.b = true;
+            return node;
+        case TOKEN_FALSE:
+            node->type = TOML_BOOL;
+            node->val.b = false;
+            return node;
+        default:
+            make_error(toml, TOML_ERR_SYNTAX, token.text, EMPTY_SPAN);
+            return NULL;
+    }
+}
+
+static toml_node_s *parse_keyval(toml_t *toml, lexer_s *lexer, token_s key_tok) {
+    toml_span_s key = parse_key(toml, key_tok);
+    if (toml_has_error(toml)) {
+        return NULL;
+    }
+
+    token_s eq_tok = lexer_next(lexer);
+    if (eq_tok.type != TOKEN_EQUAL) {
+        make_error(toml, TOML_ERR_SYNTAX, eq_tok.text, EMPTY_SPAN);
+        return NULL;
+    }
+
+    toml_node_s *node = parse_val(toml, lexer_next(lexer));
+    if (node == NULL) {
+        return NULL;
+    }
+
+    node->key = key;
+    return node;
+}
+
+typedef struct {
+    toml_node_s *head;
+    toml_node_s *tail;
+    size_t count;
+} node_list_s;
+
+static void node_list_append(node_list_s *list, toml_node_s *entry) {
+    if (list->head == NULL) {
+        list->head = entry;
+    } else {
+        list->tail->next = entry;
+    }
+    list->tail = entry;
+    list->count++;
+}
+
+static const toml_node_s *find_duplicate(const toml_node_s *head, toml_span_s key) {
+    for (const toml_node_s *existing = head; existing != NULL; existing = existing->next) {
+        if (spans_eq(existing->key, key)) {
+            return existing;
+        }
+    }
+
+    return NULL;
+}
+
+static toml_node_s *make_table_node(toml_t *toml, node_list_s entries) {
+    toml_node_s **index = create_index(&toml->arena, entries.head, entries.count);
+    if (index == NULL) {
+        make_error(toml, TOML_ERR_NOMEM, EMPTY_SPAN, EMPTY_SPAN);
+        return NULL;
+    }
+
+    toml_node_s *table = arena_alloc(&toml->arena, sizeof *table, ALIGNOF(toml_node_s));
+    if (table == NULL) {
+        make_error(toml, TOML_ERR_NOMEM, EMPTY_SPAN, EMPTY_SPAN);
+        return NULL;
+    }
+
+    *table = (toml_node_s){
+        .type = TOML_TABLE,
+        .val.t = { .entries = index, .count = entries.count },
+    };
+
+    return table;
+}
+
+static toml_node_s *parse_toml(toml_t *toml, lexer_s *lexer) {
+    node_list_s entries = { 0 };
+
+    token_s token = lexer_next(lexer);
+
+    for (;;) {
+        while (token.type == TOKEN_NEWLINE) {
+            token = lexer_next(lexer);
+        }
+
+        if (token.type == TOKEN_EOF) {
+            break;
+        }
+
+        toml_node_s *entry = parse_keyval(toml, lexer, token);
+        if (entry == NULL) {
+            return NULL;
+        }
+
+        const toml_node_s *dup = find_duplicate(entries.head, entry->key);
+        if (dup != NULL) {
+            make_error(toml, TOML_ERR_DUP_KEY, entry->key, dup->key);
+            return NULL;
+        }
+
+        node_list_append(&entries, entry);
+
+        token = lexer_next(lexer);
+        if (token.type != TOKEN_NEWLINE && token.type != TOKEN_EOF) {
+            make_error(toml, TOML_ERR_SYNTAX, token.text, EMPTY_SPAN);
+            return NULL;
+        }
+    }
+
+    return make_table_node(toml, entries);
+}
+
 toml_t *toml_from_byte(const char *byte, size_t byte_len) {
-    size_t min_size = sizeof(toml_t) + ALIGNOF(toml_t) + byte_len + 1;
+    size_t min_size = sizeof(toml_t) + ALIGNOF(toml_t) + byte_len + 1 + ARENA_CHUNK_SIZE;
     size_t chunk_size = min_size > ARENA_CHUNK_SIZE ? min_size : ARENA_CHUNK_SIZE;
 
     unsigned char *chunk = malloc(chunk_size);
@@ -389,6 +560,10 @@ toml_t *toml_from_byte(const char *byte, size_t byte_len) {
     toml->arena = arena;
     toml->error = (toml_error_s){ .code = TOML_OK };
     toml->source = make_span(copy, copy + byte_len);
+
+    lexer_s lexer;
+    lexer_init(&lexer, toml->source.ptr, toml->source.len);
+    toml->root = parse_toml(toml, &lexer);
 
     return toml;
 }

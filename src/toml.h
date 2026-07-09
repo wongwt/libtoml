@@ -51,7 +51,10 @@ typedef struct {
 
 //! TOML error codes
 typedef enum {
-    TOML_OK = 0 //!< No error
+    TOML_OK = 0, //!< No error
+    TOML_ERR_NOMEM, //!< Allocation failed
+    TOML_ERR_SYNTAX, //!< Malformed input
+    TOML_ERR_DUP_KEY //!< The same key is defined twice in one table
 } toml_errcode_e;
 
 //! Create TOML document from a byte buffer

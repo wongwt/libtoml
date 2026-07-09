@@ -83,11 +83,18 @@ static void test_source_has_nul_sentinel(void) {
 
 // Exercises the chunk_size = min_size branch in toml_from_byte(): the
 // input alone is larger than one arena chunk, so the arena must grow
-// to fit the handle, the copy, and the sentinel
+// to fit the handle, the copy, and the sentinel. The padding lives
+// inside a string value so the document still parses successfully
 static void test_from_byte_handles_input_larger_than_one_chunk(void) {
-    size_t len = ARENA_CHUNK_SIZE + 1024;
+    const char *prefix = "a = \"";
+    const char *suffix = "\"\n";
+    size_t padding_len = ARENA_CHUNK_SIZE + 1024;
+    size_t len = strlen(prefix) + padding_len + strlen(suffix);
+
     char *source = malloc(len);
-    memset(source, 'a', len);
+    memcpy(source, prefix, strlen(prefix));
+    memset(source + strlen(prefix), 'a', padding_len);
+    memcpy(source + strlen(prefix) + padding_len, suffix, strlen(suffix));
 
     toml_t *toml = toml_from_byte(source, len);
 
