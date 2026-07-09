@@ -72,7 +72,7 @@ Progress dashboard: toml-test pass count. Milestones in order, M0 through M8.
       push (`skip-check` joins the workflow once M3.3 lands)
 
 ### M1 — Core dialect vertical slice
-- [ ] M1.1 Lexer: bare keys, `=`, escape-free single-line basic
+- [x] M1.1 Lexer: bare keys, `=`, escape-free single-line basic
       strings, integers, booleans; comments/whitespace recorded as
       trivia spans; owned semantics with NUL sentinel
 - [ ] M1.2 CST node finalized; intrusive child list + contiguous index

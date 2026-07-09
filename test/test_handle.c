@@ -55,9 +55,58 @@ static void test_from_str_returns_usable_handle(void) {
     toml_free(toml);
 }
 
+static void test_source_is_copied_not_aliased(void) {
+    char source[] = "answer = 42\n";
+    size_t len = strlen(source);
+    toml_t *toml = toml_from_byte(source, len);
+
+    EXPECT(toml->source.ptr != source);
+    EXPECT(toml->source.len == len);
+    EXPECT(memcmp(toml->source.ptr, source, len) == 0);
+
+    // Mutating the caller's buffer must not affect the handle's own copy
+    source[0] = 'X';
+    EXPECT(toml->source.ptr[0] == 'a');
+
+    toml_free(toml);
+}
+
+static void test_source_has_nul_sentinel(void) {
+    const char *source = "answer = 42\n";
+    size_t len = strlen(source);
+    toml_t *toml = toml_from_byte(source, len);
+
+    EXPECT(toml->source.ptr[len] == '\0');
+
+    toml_free(toml);
+}
+
+// Exercises the chunk_size = min_size branch in toml_from_byte(): the
+// input alone is larger than one arena chunk, so the arena must grow
+// to fit the handle, the copy, and the sentinel
+static void test_from_byte_handles_input_larger_than_one_chunk(void) {
+    size_t len = ARENA_CHUNK_SIZE + 1024;
+    char *source = malloc(len);
+    memset(source, 'a', len);
+
+    toml_t *toml = toml_from_byte(source, len);
+
+    EXPECT(toml != NULL);
+    EXPECT(toml_has_error(toml) == false);
+    EXPECT(toml->source.len == len);
+    EXPECT(memcmp(toml->source.ptr, source, len) == 0);
+    EXPECT(toml->source.ptr[len] == '\0');
+
+    toml_free(toml);
+    free(source);
+}
+
 int main(void) {
     test_has_error_null_is_safe_and_true();
     test_from_str_returns_usable_handle();
+    test_source_is_copied_not_aliased();
+    test_source_has_nul_sentinel();
+    test_from_byte_handles_input_larger_than_one_chunk();
 
     printf("%d passed, %d failed\n", pass_count, fail_count);
 
