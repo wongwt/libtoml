@@ -289,6 +289,53 @@ static token_s lexer_next(lexer_s *lexer) {
     }
 }
 
+
+// TOML CST
+
+typedef enum {
+    TOML_STR,
+    TOML_S64,
+    TOML_BOOL,
+    TOML_TABLE,
+} toml_type_e;
+
+typedef struct {
+    struct toml_node **entries;
+    size_t count;
+} toml_table_s;
+
+typedef struct toml_node {
+    toml_type_e type;
+    toml_span_s key;         // This node's key span (empty for the root)
+    toml_span_s leading;     // Trivia before this node
+    toml_span_s trailing;    // Trivia after, up to end of line
+    union {
+        int64_t s64;
+        bool b;
+        toml_span_s byte;    // Non-NUL-terminated
+        toml_table_s t;
+    } val;
+    struct toml_node *next;
+} toml_node_s;
+
+TOML_NOT_YET_CALLED
+static toml_node_s **create_index(toml_arena_s *arena, toml_node_s *head, size_t count) {
+    size_t size  = count * sizeof(toml_node_s *);
+    size_t align = ALIGNOF(toml_node_s *);
+    toml_node_s **children = arena_alloc(arena, size, align);
+    if (children == NULL) {
+        return NULL;
+    }
+
+    toml_node_s *node = head;
+    for (size_t i = 0; i < count; i++) {
+        children[i] = node;
+        node = node->next;
+    }
+
+    return children;
+}
+
 typedef struct {
     toml_errcode_e code;
     toml_span_s primary;

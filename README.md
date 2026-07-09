@@ -75,7 +75,7 @@ Progress dashboard: toml-test pass count. Milestones in order, M0 through M8.
 - [x] M1.1 Lexer: bare keys, `=`, escape-free single-line basic
       strings, integers, booleans; comments/whitespace recorded as
       trivia spans; owned semantics with NUL sentinel
-- [ ] M1.2 CST node finalized; intrusive child list + contiguous index
+- [x] M1.2 CST node finalized; intrusive child list + contiguous index
       backfill on container close
 - [ ] M1.3 Parser: key-value pairs, `[table]`, duplicate detection
       with spans
