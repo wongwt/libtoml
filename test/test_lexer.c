@@ -260,6 +260,39 @@ static void test_invalid_start_char_is_error(void) {
     EXPECT(token.type == TOKEN_ERROR);
 }
 
+static void test_lbracket_token(void) {
+    lexer_s lexer = make_lexer("[");
+    token_s token = lexer_next(&lexer);
+
+    EXPECT(token.type == TOKEN_LBRACKET);
+    EXPECT(span_eq(token.text, "["));
+}
+
+static void test_rbracket_token(void) {
+    lexer_s lexer = make_lexer("]");
+    token_s token = lexer_next(&lexer);
+
+    EXPECT(token.type == TOKEN_RBRACKET);
+    EXPECT(span_eq(token.text, "]"));
+}
+
+static void test_table_header_line(void) {
+    lexer_s lexer = make_lexer("[server]\n");
+
+    token_s open = lexer_next(&lexer);
+    EXPECT(open.type == TOKEN_LBRACKET);
+
+    token_s name = lexer_next(&lexer);
+    EXPECT(name.type == TOKEN_BARE_KEY);
+    EXPECT(span_eq(name.text, "server"));
+
+    token_s close = lexer_next(&lexer);
+    EXPECT(close.type == TOKEN_RBRACKET);
+
+    token_s newline = lexer_next(&lexer);
+    EXPECT(newline.type == TOKEN_NEWLINE);
+}
+
 static void test_full_key_value_line(void) {
     lexer_s lexer = make_lexer("answer = 42\n");
 
@@ -305,6 +338,9 @@ int main(void) {
     test_bool_false();
     test_bool_keyword_prefix_is_bare_key();
     test_invalid_start_char_is_error();
+    test_lbracket_token();
+    test_rbracket_token();
+    test_table_header_line();
     test_full_key_value_line();
 
     printf("%d passed, %d failed\n", pass_count, fail_count);

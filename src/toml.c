@@ -83,6 +83,8 @@ typedef enum {
     TOKEN_ERROR,
     TOKEN_NEWLINE,
     TOKEN_EQUAL,
+    TOKEN_LBRACKET,
+    TOKEN_RBRACKET,
     TOKEN_BARE_KEY,
     TOKEN_STR,
     TOKEN_S64,
@@ -279,6 +281,12 @@ static token_s lexer_next(lexer_s *lexer) {
         case '=':
             lexer_move(lexer, 1);
             return make_token(TOKEN_EQUAL, head, lexer->cur, leading);
+        case '[':
+            lexer_move(lexer, 1);
+            return make_token(TOKEN_LBRACKET, head, lexer->cur, leading);
+        case ']':
+            lexer_move(lexer, 1);
+            return make_token(TOKEN_RBRACKET, head, lexer->cur, leading);
         case '"':
             return lexer_scan_str(lexer, leading);
         case '0': case '1': case '2': case '3': case '4': case '5':
