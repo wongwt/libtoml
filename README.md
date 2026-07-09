@@ -1,5 +1,7 @@
 # libtoml
 
+[![CI](https://github.com/wongwt/libtoml/actions/workflows/ci.yml/badge.svg)](https://github.com/wongwt/libtoml/actions/workflows/ci.yml)
+
 A TOML v1.1 library in modern C with strict C99/POSIX compliance and optional
 C11/C23 syntax sugar. MIT licensed.
 
