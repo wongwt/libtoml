@@ -55,6 +55,33 @@ static void test_from_str_returns_usable_handle(void) {
     toml_free(toml);
 }
 
+static void test_from_byte_populates_root(void) {
+    const char *source = "answer = 42\n";
+    toml_t *toml = toml_from_byte(source, strlen(source));
+
+    EXPECT(toml != NULL);
+    EXPECT(toml_has_error(toml) == false);
+    EXPECT(toml->root != NULL);
+    EXPECT(toml->root->type == TOML_TABLE);
+    EXPECT(toml->root->val.t.count == 1);
+    EXPECT(toml->root->val.t.entries[0]->type == TOML_S64);
+    EXPECT(toml->root->val.t.entries[0]->val.s64 == 42);
+
+    toml_free(toml);
+}
+
+static void test_from_byte_duplicate_key_sets_error(void) {
+    const char *source = "a = 1\na = 2\n";
+    toml_t *toml = toml_from_byte(source, strlen(source));
+
+    EXPECT(toml != NULL);
+    EXPECT(toml_has_error(toml) == true);
+    EXPECT(toml->error.code == TOML_ERR_DUP_KEY);
+    EXPECT(toml->root == NULL);
+
+    toml_free(toml);
+}
+
 static void test_source_is_copied_not_aliased(void) {
     char source[] = "answer = 42\n";
     size_t len = strlen(source);
@@ -81,10 +108,6 @@ static void test_source_has_nul_sentinel(void) {
     toml_free(toml);
 }
 
-// Exercises the chunk_size = min_size branch in toml_from_byte(): the
-// input alone is larger than one arena chunk, so the arena must grow
-// to fit the handle, the copy, and the sentinel. The padding lives
-// inside a string value so the document still parses successfully
 static void test_from_byte_handles_input_larger_than_one_chunk(void) {
     const char *prefix = "a = \"";
     const char *suffix = "\"\n";
@@ -111,6 +134,8 @@ static void test_from_byte_handles_input_larger_than_one_chunk(void) {
 int main(void) {
     test_has_error_null_is_safe_and_true();
     test_from_str_returns_usable_handle();
+    test_from_byte_populates_root();
+    test_from_byte_duplicate_key_sets_error();
     test_source_is_copied_not_aliased();
     test_source_has_nul_sentinel();
     test_from_byte_handles_input_larger_than_one_chunk();

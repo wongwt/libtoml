@@ -22,10 +22,6 @@
 // TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-// Unit tests for the CST node type and the intrusive-list -> contiguous
-// array backfill utility. No parser exists yet (M1.3), so children
-// lists are built by hand here.
-
 #include "../src/toml.c"
 
 #include <stdio.h>

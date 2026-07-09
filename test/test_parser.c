@@ -22,10 +22,6 @@
 // TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-// Unit tests for the parser: parse_key(), parse_val(), parse_keyval(),
-// parse_table_header(), and parse_toml(), including `[table]` sections
-// and duplicate-key/duplicate-table-name detection.
-
 #include "../src/toml.c"
 
 #include <stdio.h>
@@ -153,10 +149,6 @@ static void test_parse_val_s64_negative(void) {
     toml_free(toml);
 }
 
-// A digit run longer than S64_TEXT_BUF_SIZE can't be copied into the
-// fixed decode buffer safely; parse_s64_value() must clamp instead of
-// overflowing it. Full overflow semantics are still M2/M3 work -- this
-// only guards the buffer itself
 static void test_parse_val_s64_too_long_clamps_without_overflow(void) {
     toml_t *toml = toml_from_byte("", 0);
     lexer_s pos = make_lexer("99999999999999999999999999");
@@ -298,10 +290,6 @@ static void test_parse_toml_blank_lines_and_comments_ignored(void) {
     toml_free(toml);
 }
 
-// A trailing comment already works by construction: lexer_scan_trivia()
-// treats '#...' as trivia regardless of position, so it becomes the
-// following newline token's leading trivia. This proves it end-to-end
-// through parse_toml() rather than only at the lexer level
 static void test_parse_toml_trailing_comment_after_value(void) {
     toml_t *toml = toml_from_byte("", 0);
     lexer_s lexer = make_lexer("a = 1 # comment\n");
@@ -436,9 +424,6 @@ static void test_parse_toml_consecutive_tables(void) {
     toml_free(toml);
 }
 
-// Two consecutive empty tables: closing the first one's (empty) body
-// happens purely because the second '[' was seen, not because it had
-// any entries
 static void test_parse_toml_consecutive_empty_tables(void) {
     toml_t *toml = toml_from_byte("", 0);
     lexer_s lexer = make_lexer("[a]\n[b]\n");
@@ -467,8 +452,6 @@ static void test_parse_toml_duplicate_table_name(void) {
     toml_free(toml);
 }
 
-// A table name colliding with an already-defined top-level key is the
-// same kind of collision as two identical keys
 static void test_parse_toml_table_name_collides_with_existing_key(void) {
     toml_t *toml = toml_from_byte("", 0);
     lexer_s lexer = make_lexer("server = 1\n[server]\n");
