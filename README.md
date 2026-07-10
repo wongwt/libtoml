@@ -81,7 +81,7 @@ Progress dashboard: toml-test pass count. Milestones in order, M0 through M8.
       backfill on container close
 - [x] M1.3 Parser: key-value pairs, `[table]`, duplicate detection
       with spans
-- [ ] M1.4 Span-stitching serializer; **round-trip test
+- [x] M1.4 Span-stitching serializer; **round-trip test
       `serialize(parse(x)) == x` goes live**
 - [ ] M1.5 Access API: dotted-path lookup with array-index segments
       (`servers.0.host`) and quoted-segment rule documented;

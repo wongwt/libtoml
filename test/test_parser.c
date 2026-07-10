@@ -203,7 +203,7 @@ static void test_parse_keyval(void) {
     lexer_s lexer = make_lexer("answer = 42");
     token_s key_tok = lexer_next(&lexer);
 
-    toml_node_s *node = parse_keyval(toml, &lexer, key_tok);
+    toml_node_s *node = parse_keyval(toml, &lexer, key_tok, key_tok.text.ptr);
 
     EXPECT(node != NULL);
     EXPECT(span_eq(node->key, "answer"));
@@ -218,11 +218,46 @@ static void test_parse_keyval_missing_equal_is_syntax_error(void) {
     lexer_s lexer = make_lexer("answer 42");
     token_s key_tok = lexer_next(&lexer);
 
-    toml_node_s *node = parse_keyval(toml, &lexer, key_tok);
+    toml_node_s *node = parse_keyval(toml, &lexer, key_tok, key_tok.text.ptr);
 
     EXPECT(node == NULL);
     EXPECT(toml_has_error(toml) == true);
     EXPECT(toml->error.code == TOML_ERR_SYNTAX);
+
+    toml_free(toml);
+}
+
+static void test_parse_keyval_spans_stitch_leading_text_trailing(void) {
+    toml_t *toml = toml_from_byte("", 0);
+    const char *source = "   answer = 42 # note\n";
+    lexer_s lexer = make_lexer(source);
+    token_s key_tok = lexer_next(&lexer);
+
+    toml_node_s *node = parse_keyval(toml, &lexer, key_tok, source);
+
+    EXPECT(node != NULL);
+    EXPECT(node->leading.ptr == source);
+    EXPECT(node->leading.len == 3);
+    EXPECT(span_eq(node->text, "answer = 42"));
+    EXPECT(span_eq(node->trailing, " # note\n"));
+
+    toml_free(toml);
+}
+
+static void test_parse_table_header_spans_stitch_leading_text_trailing(void) {
+    toml_t *toml = toml_from_byte("", 0);
+    const char *source = "[server] # note\n";
+    lexer_s lexer = make_lexer(source);
+    token_s lbracket_tok = lexer_next(&lexer);
+    node_list_s root_entries = { 0 };
+
+    toml_node_s *table = parse_table_header(toml, &lexer, &root_entries, source, lbracket_tok);
+
+    EXPECT(table != NULL);
+    EXPECT(table->leading.ptr == source);
+    EXPECT(table->leading.len == 0);
+    EXPECT(span_eq(table->text, "[server]"));
+    EXPECT(span_eq(table->trailing, " # note\n"));
 
     toml_free(toml);
 }
@@ -504,6 +539,8 @@ int main(void) {
     test_parse_val_rejects_unexpected_token();
     test_parse_keyval();
     test_parse_keyval_missing_equal_is_syntax_error();
+    test_parse_keyval_spans_stitch_leading_text_trailing();
+    test_parse_table_header_spans_stitch_leading_text_trailing();
     test_parse_toml_single_keyval();
     test_parse_toml_multiple_keyvals();
     test_parse_toml_empty_input();

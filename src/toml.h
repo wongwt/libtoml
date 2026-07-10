@@ -65,6 +65,14 @@ typedef enum {
 //! @return  TOML document handle
 toml_t *toml_from_byte(const char *byte, size_t byte_len);
 
+//! Serialize TOML document back to its exact source bytes
+//!
+//! @param[in]   toml  Document handle, or `NULL`
+//! @param[out]  out   Destination buffer, sized to the original source
+//! @retval  0  The handle is `NULL` or holds a failed parse
+//! @return  Number of bytes written to `out`
+size_t toml_to_byte(const toml_t *toml, char *out);
+
 //! Tear down a TOML document handle
 //!
 //! @param[in]  toml  The handle to destroy, or `NULL` (ignored)

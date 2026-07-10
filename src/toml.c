@@ -295,9 +295,8 @@ typedef enum {
 } toml_type_e;
 
 typedef struct {
-    // `entries` is written by finalize_table() and read today only by
-    // tests via white-box access; the serializer (M1.4) / access API
-    // (M1.5) add a real production reader
+    // `entries` is written by finalize_table() and read by the
+    // serializer; the access API (M1.5) adds a lookup reader
     // cppcheck-suppress unusedStructMember
     struct toml_node **entries;
     size_t count;
@@ -306,8 +305,9 @@ typedef struct {
 typedef struct toml_node {
     toml_type_e type;
     toml_span_s key;         // This node's key span (empty for the root)
-    toml_span_s leading;     // Trivia before this node
-    toml_span_s trailing;    // Trivia after, up to end of line
+    toml_span_s text;        // Exact source bytes of "key = value" or "[name]"
+    toml_span_s leading;     // Trivia before this node, back to the previous sibling
+    toml_span_s trailing;    // Trivia after, through the line-ending token
     union {
         int64_t s64;
         bool b;
@@ -343,8 +343,9 @@ typedef struct {
 struct toml {
     toml_arena_s arena;
     toml_error_s error;
-    toml_span_s source;  // Owned copy of the input, NUL-terminated
+    toml_span_s source;    // Owned copy of the input, NUL-terminated
     toml_node_s *root;
+    toml_span_s trailing;  // Trivia after the last entry, to end of source
 };
 
 
@@ -427,7 +428,7 @@ static toml_node_s *parse_val(toml_t *toml, token_s token) {
     }
 }
 
-static toml_node_s *parse_keyval(toml_t *toml, lexer_s *lexer, token_s key_tok) {
+static toml_node_s *parse_keyval(toml_t *toml, lexer_s *lexer, token_s key_tok, const char *leading_start) {
     toml_span_s key = parse_key(toml, key_tok);
     if (toml_has_error(toml)) {
         return NULL;
@@ -439,12 +440,25 @@ static toml_node_s *parse_keyval(toml_t *toml, lexer_s *lexer, token_s key_tok) 
         return NULL;
     }
 
-    toml_node_s *node = parse_val(toml, lexer_next(lexer));
+    token_s val_tok = lexer_next(lexer);
+    toml_node_s *node = parse_val(toml, val_tok);
     if (node == NULL) {
         return NULL;
     }
 
     node->key = key;
+    node->leading = make_span(leading_start, key_tok.text.ptr);
+    node->text = make_span(key_tok.text.ptr, val_tok.text.ptr + val_tok.text.len);
+
+    token_s term_tok = lexer_next(lexer);
+    if (term_tok.type != TOKEN_NEWLINE && term_tok.type != TOKEN_EOF) {
+        make_error(toml, TOML_ERR_SYNTAX, term_tok.text, EMPTY_SPAN);
+        return NULL;
+    }
+
+    const char *text_end = node->text.ptr + node->text.len;
+    node->trailing = make_span(text_end, term_tok.text.ptr + term_tok.text.len);
+
     return node;
 }
 
@@ -501,7 +515,7 @@ static toml_node_s *make_table_node(toml_t *toml, node_list_s entries) {
     return node;
 }
 
-static toml_node_s *parse_table_header(toml_t *toml, lexer_s *lexer, node_list_s *root_entries) {
+static toml_node_s *parse_table_header(toml_t *toml, lexer_s *lexer, node_list_s *root_entries, const char *leading_start, token_s lbracket_tok) {
     toml_span_s name = parse_key(toml, lexer_next(lexer));
     if (toml_has_error(toml)) {
         return NULL;
@@ -532,6 +546,12 @@ static toml_node_s *parse_table_header(toml_t *toml, lexer_s *lexer, node_list_s
     }
 
     *table = (toml_node_s){ .type = TOML_TABLE, .key = name };
+    table->leading = make_span(leading_start, lbracket_tok.text.ptr);
+    table->text = make_span(lbracket_tok.text.ptr, close_token.text.ptr + close_token.text.len);
+
+    const char *text_end = table->text.ptr + table->text.len;
+    table->trailing = make_span(text_end, after_token.text.ptr + after_token.text.len);
+
     node_list_append(root_entries, table);
 
     return table;
@@ -541,6 +561,7 @@ static toml_node_s *parse_toml(toml_t *toml, lexer_s *lexer) {
     node_list_s root_entries = { 0 };
     node_list_s cur_entries = { 0 };
     toml_node_s *cur_table = NULL;  // NULL while collecting the root's own body
+    const char *pos = lexer->cur;   // End of the previously parsed entry
 
     token_s token = lexer_next(lexer);
 
@@ -557,20 +578,22 @@ static toml_node_s *parse_toml(toml_t *toml, lexer_s *lexer) {
             }
 
             if (token.type == TOKEN_EOF) {
+                toml->trailing = make_span(pos, lexer->end);
                 break;
             }
 
-            cur_table = parse_table_header(toml, lexer, &root_entries);
+            cur_table = parse_table_header(toml, lexer, &root_entries, pos, token);
             if (cur_table == NULL) {
                 return NULL;
             }
 
+            pos = cur_table->trailing.ptr + cur_table->trailing.len;
             cur_entries = (node_list_s){ 0 };
             token = lexer_next(lexer);
             continue;
         }
 
-        toml_node_s *entry = parse_keyval(toml, lexer, token);
+        toml_node_s *entry = parse_keyval(toml, lexer, token, pos);
         if (entry == NULL) {
             return NULL;
         }
@@ -582,15 +605,42 @@ static toml_node_s *parse_toml(toml_t *toml, lexer_s *lexer) {
         }
 
         node_list_append(&cur_entries, entry);
+        pos = entry->trailing.ptr + entry->trailing.len;
 
         token = lexer_next(lexer);
-        if (token.type != TOKEN_NEWLINE && token.type != TOKEN_EOF) {
-            make_error(toml, TOML_ERR_SYNTAX, token.text, EMPTY_SPAN);
-            return NULL;
-        }
     }
 
     return make_table_node(toml, root_entries);
+}
+
+
+// TOML Serializer
+
+static char *emit_span(char *out, toml_span_s span) {
+    memcpy(out, span.ptr, span.len);
+    return out + span.len;
+}
+
+static char *serialize_node(char *out, const toml_node_s *node);
+
+static char *serialize_entries(char *out, toml_node_s * const *entries, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        out = serialize_node(out, entries[i]);
+    }
+
+    return out;
+}
+
+static char *serialize_node(char *out, const toml_node_s *node) {
+    out = emit_span(out, node->leading);
+    out = emit_span(out, node->text);
+    out = emit_span(out, node->trailing);
+
+    if (node->type == TOML_TABLE) {
+        out = serialize_entries(out, node->val.t.entries, node->val.t.count);
+    }
+
+    return out;
 }
 
 toml_t *toml_from_byte(const char *byte, size_t byte_len) {
@@ -629,6 +679,17 @@ toml_t *toml_from_byte(const char *byte, size_t byte_len) {
     toml->root = parse_toml(toml, &lexer);
 
     return toml;
+}
+
+size_t toml_to_byte(const toml_t *toml, char *out) {
+    if (toml_has_error(toml)) {
+        return 0;
+    }
+
+    char *tail = serialize_entries(out, toml->root->val.t.entries, toml->root->val.t.count);
+    tail = emit_span(tail, toml->trailing);
+
+    return (size_t)(tail - out);
 }
 
 void toml_free(toml_t *toml) {
