@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static int pass_count = 0;
 static int fail_count = 0;
@@ -131,6 +132,72 @@ static void test_from_byte_handles_input_larger_than_one_chunk(void) {
     free(source);
 }
 
+// Redirects stderr to a temp file for the duration of `fn(toml)`, then
+// copies up to `buf_len - 1` captured bytes into `buf` as a C string
+static void capture_stderr(void (*fn)(const toml_t *), const toml_t *toml, char *buf, size_t buf_len) {
+    fflush(stderr);
+    int saved_fd = dup(fileno(stderr));
+    FILE *tmp = tmpfile();
+    dup2(fileno(tmp), fileno(stderr));
+
+    fn(toml);
+
+    fflush(stderr);
+    dup2(saved_fd, fileno(stderr));
+    close(saved_fd);
+
+    rewind(tmp);
+    size_t n = fread(buf, 1, buf_len - 1, tmp);
+    buf[n] = '\0';
+    fclose(tmp);
+}
+
+static void test_err_print_null_handle_is_safe_and_silent(void) {
+    char buf[128];
+    capture_stderr(toml_err_print, NULL, buf, sizeof buf);
+
+    EXPECT(buf[0] == '\0');
+}
+
+static void test_err_print_no_error_is_silent(void) {
+    const char *source = "answer = 42\n";
+    toml_t *toml = toml_from_byte(source, strlen(source));
+    char buf[128];
+
+    capture_stderr(toml_err_print, toml, buf, sizeof buf);
+
+    EXPECT(buf[0] == '\0');
+
+    toml_free(toml);
+}
+
+static void test_err_print_writes_code_and_offset(void) {
+    const char *source = "a = 1\na = 2\n";  // Second "a" key starts at offset 6
+    toml_t *toml = toml_from_byte(source, strlen(source));
+    char buf[128];
+
+    capture_stderr(toml_err_print, toml, buf, sizeof buf);
+
+    EXPECT(strstr(buf, "TOML_ERR_DUP_KEY") != NULL);
+    EXPECT(strstr(buf, "offset 6") != NULL);
+
+    toml_free(toml);
+}
+
+static void test_err_print_type_error_offset(void) {
+    const char *source = "answer = 42\n";  // "answer" key starts at offset 0
+    toml_t *toml = toml_from_byte(source, strlen(source));
+    toml_get_str(toml, "answer");  // Wrong type: sets TOML_ERR_TYPE
+    char buf[128];
+
+    capture_stderr(toml_err_print, toml, buf, sizeof buf);
+
+    EXPECT(strstr(buf, "TOML_ERR_TYPE") != NULL);
+    EXPECT(strstr(buf, "offset 0") != NULL);
+
+    toml_free(toml);
+}
+
 int main(void) {
     test_has_error_null_is_safe_and_true();
     test_from_str_returns_usable_handle();
@@ -139,6 +206,10 @@ int main(void) {
     test_source_is_copied_not_aliased();
     test_source_has_nul_sentinel();
     test_from_byte_handles_input_larger_than_one_chunk();
+    test_err_print_null_handle_is_safe_and_silent();
+    test_err_print_no_error_is_silent();
+    test_err_print_writes_code_and_offset();
+    test_err_print_type_error_offset();
 
     printf("%d passed, %d failed\n", pass_count, fail_count);
 

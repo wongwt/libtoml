@@ -87,7 +87,7 @@ Progress dashboard: toml-test pass count. Milestones in order, M0 through M8.
       (`servers.0.host`) and quoted-segment rule documented;
       `toml_get_s64()` / `_or` family; `toml_has()`, `toml_type()`;
       sticky-error clear/overwrite semantics with unit tests
-- [ ] M1.6 `test-release` target; first ~5 error codes;
+- [x] M1.6 `test-release` target; first ~5 error codes;
       `toml_err_print()` minimal version (code + offset)
 
 ### M2 — Full TOML 1.0

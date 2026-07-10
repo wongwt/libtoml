@@ -19,6 +19,7 @@ DBGLIB := libtoml-dbg.a
 TESTS := $(wildcard $(testdir)/test_*.c)
 TESTBINS := $(TESTS:.c=)
 SANTESTBINS := $(TESTS:.c=.san)
+RELTESTBINS := $(TESTS:.c=.rel)
 
 IS_CLANG := $(shell $(CC) --version 2>/dev/null | grep -qi clang && echo 1)
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all
@@ -88,7 +89,14 @@ test-valgrind: CFLAGS = -std=c99 -O0 -g3 -Wall -Wextra -Werror
 test-valgrind: $(TESTBINS)
 	@$(call run_tests,$(TESTBINS),$(VALGRIND) --error-exitcode=1 --leak-check=full)
 
+.PHONY: test-release
+test-release: $(RELTESTBINS)
+	@$(call run_tests,$(RELTESTBINS))
+
+$(testdir)/test_%.rel: $(testdir)/test_%.c $(SRCS) $(HDRS)
+	$(CC) $(CFLAGS) $< -o $@
+
 .PHONY: clean
 clean:
 	$(RM) -r $(srcdir)/*.o $(srcdir)/*.dbg.o $(LIB) $(DBGLIB)
-	$(RM) -r $(TESTBINS) $(SANTESTBINS) $(testdir)/*.dSYM
+	$(RM) -r $(TESTBINS) $(SANTESTBINS) $(RELTESTBINS) $(testdir)/*.dSYM

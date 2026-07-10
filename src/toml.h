@@ -95,6 +95,15 @@ void toml_free(toml_t *toml);
 //! @retval  false  The most recent operation succeeded
 bool toml_has_error(const toml_t *toml);
 
+//! Print the most recent error to stderr, if any
+//!
+//! Minimal formatting for now: error code and byte offset into the
+//! source. Source-excerpt rendering with a caret and help text lands
+//! in M5.
+//!
+//! @param[in]  toml  The handle to inspect, or `NULL` (no-op)
+void toml_err_print(const toml_t *toml);
+
 //! Report whether a path resolves to a value
 //!
 //! @param[in]  toml  TOML document handle

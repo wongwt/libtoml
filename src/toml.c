@@ -25,6 +25,7 @@
 #include "toml.h"
 
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -815,6 +816,34 @@ bool toml_has_error(const toml_t *toml) {
     }
 
     return toml->error.code != TOML_OK;
+}
+
+static const char *errcode_name(toml_errcode_e code) {
+    switch (code) {
+        case TOML_OK: return "TOML_OK";
+        case TOML_ERR_NOMEM: return "TOML_ERR_NOMEM";
+        case TOML_ERR_SYNTAX: return "TOML_ERR_SYNTAX";
+        case TOML_ERR_DUP_KEY: return "TOML_ERR_DUP_KEY";
+        case TOML_ERR_TYPE: return "TOML_ERR_TYPE";
+    }
+
+    return "TOML_ERR_UNKNOWN";
+}
+
+void toml_err_print(const toml_t *toml) {
+    if (toml == NULL || !toml_has_error(toml)) {
+        return;
+    }
+
+    const char *name = errcode_name(toml->error.code);
+
+    if (toml->error.primary.ptr == NULL) {
+        fprintf(stderr, "%s\n", name);
+        return;
+    }
+
+    size_t offset = (size_t)(toml->error.primary.ptr - toml->source.ptr);
+    fprintf(stderr, "%s at offset %zu\n", name, offset);
 }
 
 bool toml_has(const toml_t *toml, const char *path) {
