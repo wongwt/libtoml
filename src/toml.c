@@ -287,17 +287,7 @@ static token_s lexer_next(lexer_s *lexer) {
 
 // TOML CST
 
-typedef enum {
-    TOML_STR,
-    TOML_S64,
-    TOML_BOOL,
-    TOML_TABLE,
-} toml_type_e;
-
 typedef struct {
-    // `entries` is written by finalize_table() and read by the
-    // serializer; the access API (M1.5) adds a lookup reader
-    // cppcheck-suppress unusedStructMember
     struct toml_node **entries;
     size_t count;
 } toml_table_s;
@@ -643,6 +633,124 @@ static char *serialize_node(char *out, const toml_node_s *node) {
     return out;
 }
 
+
+// TOML Access API
+
+static const toml_node_s *find_key(const toml_table_s *table, toml_span_s key) {
+    for (size_t i = 0; i < table->count; i++) {
+        if (spans_eq(table->entries[i]->key, key)) {
+            return table->entries[i];
+        }
+    }
+
+    return NULL;
+}
+
+static bool is_all_digits(toml_span_s span) {
+    for (size_t i = 0; i < span.len; i++) {
+        if (!is_dec_digit(span.ptr[i])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool next_segment(const char **cur, const char *end, toml_span_s *out, bool *out_quoted) {
+    const char *p = *cur;
+
+    if (p < end && *p == '"') {
+        p++;
+        const char *head = p;
+        while (p < end && *p != '"') {
+            p++;
+        }
+        if (p == end) {
+            return false;
+        }
+        *out = make_span(head, p);
+        *out_quoted = true;
+        p++;
+    } else {
+        const char *head = p;
+        while (p < end && *p != '.') {
+            p++;
+        }
+        if (p == head) {
+            return false;
+        }
+        *out = make_span(head, p);
+        *out_quoted = false;
+    }
+
+    if (p < end) {
+        if (*p != '.') {
+            return false;
+        }
+        p++;
+        if (p == end) {
+            return false;
+        }
+    }
+
+    *cur = p;
+    return true;
+}
+
+static const toml_node_s *seek_node(const toml_t *toml, const char *path) {
+    const toml_node_s *node = toml->root;
+    const char *cur = path;
+    const char *end = path + strlen(path);
+
+    if (cur == end) {
+        return NULL;
+    }
+
+    while (cur < end) {
+        toml_span_s seg;
+        bool is_quoted;
+        if (!next_segment(&cur, end, &seg, &is_quoted)) {
+            return NULL;
+        }
+
+        if (!is_quoted && is_all_digits(seg)) {
+            // Reserved for a future array index; no node ever matches
+            return NULL;
+        }
+
+        if (node->type != TOML_TABLE) {
+            return NULL;
+        }
+
+        node = find_key(&node->val.t, seg);
+        if (node == NULL) {
+            return NULL;
+        }
+    }
+
+    return node;
+}
+
+static bool document_usable(const toml_t *toml) {
+    return toml != NULL && toml->root != NULL;
+}
+
+static void clear_error(toml_t *toml) {
+    toml->error = (toml_error_s){ .code = TOML_OK };
+}
+
+static const char *materialize_cstr(toml_t *toml, toml_span_s raw) {
+    char *buf = arena_alloc(&toml->arena, raw.len + 1, 1);
+    if (buf == NULL) {
+        return NULL;
+    }
+
+    memcpy(buf, raw.ptr, raw.len);
+    buf[raw.len] = '\0';
+
+    return buf;
+}
+
 toml_t *toml_from_byte(const char *byte, size_t byte_len) {
     size_t chunk_size = sizeof(toml_t) + ALIGNOF(toml_t) + byte_len + 1 + ARENA_CHUNK_SIZE;
     unsigned char *chunk = malloc(chunk_size);
@@ -682,13 +790,14 @@ toml_t *toml_from_byte(const char *byte, size_t byte_len) {
 }
 
 size_t toml_to_byte(const toml_t *toml, char *out) {
-    if (toml_has_error(toml)) {
+    if (!document_usable(toml)) {
         return 0;
     }
 
     char *tail = serialize_entries(out, toml->root->val.t.entries, toml->root->val.t.count);
     tail = emit_span(tail, toml->trailing);
 
+    clear_error((toml_t *)toml);
     return (size_t)(tail - out);
 }
 
@@ -706,4 +815,104 @@ bool toml_has_error(const toml_t *toml) {
     }
 
     return toml->error.code != TOML_OK;
+}
+
+bool toml_has(const toml_t *toml, const char *path) {
+    if (!document_usable(toml)) {
+        return false;
+    }
+
+    const toml_node_s *node = seek_node(toml, path);
+    clear_error((toml_t *)toml);
+
+    return node != NULL;
+}
+
+toml_type_e toml_type(const toml_t *toml, const char *path) {
+    if (!document_usable(toml)) {
+        return TOML_UNKNOWN;
+    }
+
+    const toml_node_s *node = seek_node(toml, path);
+    clear_error((toml_t *)toml);
+
+    return (node == NULL) ? TOML_UNKNOWN : node->type;
+}
+
+int64_t toml_get_s64_or(const toml_t *toml, const char *path, int64_t def_val) {
+    if (!document_usable(toml)) {
+        return def_val;
+    }
+
+    toml_t *mut = (toml_t *)toml;
+    const toml_node_s *node = seek_node(toml, path);
+
+    if (node == NULL) {
+        clear_error(mut);
+        return def_val;
+    }
+
+    if (node->type != TOML_S64) {
+        make_error(mut, TOML_ERR_TYPE, node->key, EMPTY_SPAN);
+        return def_val;
+    }
+
+    clear_error(mut);
+    return node->val.s64;
+}
+
+bool toml_get_bool_or(const toml_t *toml, const char *path, bool def_val) {
+    if (!document_usable(toml)) {
+        return def_val;
+    }
+
+    toml_t *mut = (toml_t *)toml;
+    const toml_node_s *node = seek_node(toml, path);
+
+    if (node == NULL) {
+        clear_error(mut);
+        return def_val;
+    }
+
+    if (node->type != TOML_BOOL) {
+        make_error(mut, TOML_ERR_TYPE, node->key, EMPTY_SPAN);
+        return def_val;
+    }
+
+    clear_error(mut);
+    return node->val.b;
+}
+
+const char *toml_get_str(const toml_t *toml, const char *path) {
+    if (!document_usable(toml)) {
+        return NULL;
+    }
+
+    toml_t *mut = (toml_t *)toml;
+    const toml_node_s *node = seek_node(toml, path);
+
+    if (node == NULL) {
+        clear_error(mut);
+        return NULL;
+    }
+
+    if (node->type != TOML_STR) {
+        make_error(mut, TOML_ERR_TYPE, node->key, EMPTY_SPAN);
+        return NULL;
+    }
+
+    const char *str = materialize_cstr(mut, node->val.byte);
+    if (str == NULL) {
+        make_error(mut, TOML_ERR_NOMEM, node->key, EMPTY_SPAN);
+        return NULL;
+    }
+
+    clear_error(mut);
+    return str;
+}
+
+const char *toml_get_str_or(const toml_t *toml, const char *path, const char *def_val) {
+    const char *str = toml_get_str(toml, path);
+
+    return (str == NULL) ? def_val : str;
 }

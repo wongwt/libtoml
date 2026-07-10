@@ -83,7 +83,7 @@ Progress dashboard: toml-test pass count. Milestones in order, M0 through M8.
       with spans
 - [x] M1.4 Span-stitching serializer; **round-trip test
       `serialize(parse(x)) == x` goes live**
-- [ ] M1.5 Access API: dotted-path lookup with array-index segments
+- [x] M1.5 Access API: dotted-path lookup with array-index segments
       (`servers.0.host`) and quoted-segment rule documented;
       `toml_get_s64()` / `_or` family; `toml_has()`, `toml_type()`;
       sticky-error clear/overwrite semantics with unit tests

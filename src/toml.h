@@ -54,8 +54,18 @@ typedef enum {
     TOML_OK = 0, //!< No error
     TOML_ERR_NOMEM, //!< Allocation failed
     TOML_ERR_SYNTAX, //!< Malformed input
-    TOML_ERR_DUP_KEY //!< The same key is defined twice in one table
+    TOML_ERR_DUP_KEY, //!< The same key is defined twice in one table
+    TOML_ERR_TYPE //!< The value at the path has a different type than requested
 } toml_errcode_e;
+
+//! TOML data types
+typedef enum {
+    TOML_UNKNOWN = 0,        //!< No value: the path did not resolve
+    TOML_STR,                //!< Basic string
+    TOML_S64,                //!< 64-bit signed integer
+    TOML_BOOL,               //!< Boolean `true` / `false`
+    TOML_TABLE               //!< `[table]` or the implicit root table
+} toml_type_e;
 
 //! Create TOML document from a byte buffer
 //!
@@ -85,6 +95,22 @@ void toml_free(toml_t *toml);
 //! @retval  false  The most recent operation succeeded
 bool toml_has_error(const toml_t *toml);
 
+//! Report whether a path resolves to a value
+//!
+//! @param[in]  toml  TOML document handle
+//! @param[in]  path  Dotted path to check
+//! @retval  true   The path resolves to a value
+//! @retval  false  The path is absent, malformed, or the handle failed to parse
+bool toml_has(const toml_t *toml, const char *path);
+
+//! Report the type of the value at a path
+//!
+//! @param[in]  toml  TOML document handle
+//! @param[in]  path  Dotted path to inspect
+//! @retval  TOML_UNKNOWN  The path is absent, malformed, or the handle failed to parse
+//! @return  The type of the value at the path
+toml_type_e toml_type(const toml_t *toml, const char *path);
+
 //! Retrieve an integer value or return a fallback
 //!
 //! @param[in]  toml     TOML document handle
@@ -92,14 +118,6 @@ bool toml_has_error(const toml_t *toml);
 //! @param[in]  def_val  Fallback when the path is absent
 //! @return  The value at the path, or the fallback if absent
 int64_t toml_get_s64_or(const toml_t *toml, const char *path, int64_t def_val);
-
-//! Retrieve a floating-point value or return a fallback
-//!
-//! @param[in]  toml     TOML document handle
-//! @param[in]  path     Dotted path to the value
-//! @param[in]  def_val  Fallback when the path is absent
-//! @return  The value at the path, or the fallback if absent
-double toml_get_f64_or(const toml_t *toml, const char *path, double def_val);
 
 //! Retrieve a boolean value or return a fallback
 //!
