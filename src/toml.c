@@ -116,11 +116,11 @@ static toml_span_s make_span(const char *head, const char *tail) {
     };
 }
 
-static token_s make_token(token_type_e type, const char *head, const char *tail, toml_span_s leading) {
+static token_s make_token(token_type_e type, toml_span_s text, toml_span_s leading) {
     return (token_s){
         .type = type,
         .leading = leading,
-        .text = make_span(head, tail),
+        .text = text,
     };
 }
 
@@ -178,20 +178,20 @@ static token_s lexer_scan_bare_key(lexer_s *lexer, toml_span_s leading) {
     if (lexer->cur == head) {
         // Move past the erroneous byte
         lexer_move(lexer, 1);
-        return make_token(TOKEN_ERROR, head, lexer->cur, leading);
+        return make_token(TOKEN_ERROR, make_span(head, lexer->cur), leading);
     }
 
     toml_span_s text = make_span(head, lexer->cur);
 
     if (span_eq_literal(text, "true")) {
-        return make_token(TOKEN_TRUE, head, lexer->cur, leading);
+        return make_token(TOKEN_TRUE, text, leading);
     }
 
     if (span_eq_literal(text, "false")) {
-        return make_token(TOKEN_FALSE, head, lexer->cur, leading);
+        return make_token(TOKEN_FALSE, text, leading);
     }
 
-    return make_token(TOKEN_BARE_KEY, head, lexer->cur, leading);
+    return make_token(TOKEN_BARE_KEY, text, leading);
 }
 
 static token_s lexer_scan_s64(lexer_s *lexer, toml_span_s leading) {
@@ -211,15 +211,15 @@ static token_s lexer_scan_s64(lexer_s *lexer, toml_span_s leading) {
     bool has_digit = lexer->cur != first_digit;
     bool clean_end = lexer_eof(lexer) || !is_bare_key_char(lexer_peek(lexer, 0));
     if (has_digit && clean_end) {
-        return make_token(TOKEN_S64, head, lexer->cur, leading);
+        return make_token(TOKEN_S64, make_span(head, lexer->cur), leading);
     }
 
     if (has_plus) {
-        return make_token(TOKEN_ERROR, head, lexer->cur, leading);
-    } else {
-        lexer->cur = head;
-        return lexer_scan_bare_key(lexer, leading);
+        return make_token(TOKEN_ERROR, make_span(head, lexer->cur), leading);
     }
+
+    lexer->cur = head;
+    return lexer_scan_bare_key(lexer, leading);
 }
 
 static token_s lexer_scan_str(lexer_s *lexer, toml_span_s leading) {
@@ -230,19 +230,19 @@ static token_s lexer_scan_str(lexer_s *lexer, toml_span_s leading) {
 
     while (!lexer_eof(lexer) && lexer_peek(lexer, 0) != '"') {
         if (is_newline(lexer_peek(lexer, 0)) || lexer_peek(lexer, 0) == '\\') {
-            return make_token(TOKEN_ERROR, head, lexer->cur, leading);
+            return make_token(TOKEN_ERROR, make_span(head, lexer->cur), leading);
         }
         lexer_move(lexer, 1);
     }
 
     if (lexer_eof(lexer)) {
-        return make_token(TOKEN_ERROR, head, lexer->cur, leading);
+        return make_token(TOKEN_ERROR, make_span(head, lexer->cur), leading);
     }
 
     // Skip closing quote
     lexer_move(lexer, 1);
 
-    return make_token(TOKEN_STR, head, lexer->cur, leading);
+    return make_token(TOKEN_STR, make_span(head, lexer->cur), leading);
 }
 
 static token_s lexer_next(lexer_s *lexer) {
@@ -251,30 +251,30 @@ static token_s lexer_next(lexer_s *lexer) {
     const char *head = lexer->cur;
 
     if (lexer_eof(lexer)) {
-        return make_token(TOKEN_EOF, head, head, leading);
+        return make_token(TOKEN_EOF, make_span(head, head), leading);
     }
 
     switch (lexer_peek(lexer, 0)) {
         case '\n':
             lexer_move(lexer, 1);
-            return make_token(TOKEN_NEWLINE, head, lexer->cur, leading);
+            return make_token(TOKEN_NEWLINE, make_span(head, lexer->cur), leading);
         case '\r':
             if (lexer_peek(lexer, 1) != '\n') {
                 lexer_move(lexer, 1);
-                return make_token(TOKEN_ERROR, head, lexer->cur, leading);
-            } else {
-                lexer_move(lexer, 2);
-                return make_token(TOKEN_NEWLINE, head, lexer->cur, leading);
+                return make_token(TOKEN_ERROR, make_span(head, lexer->cur), leading);
             }
+
+            lexer_move(lexer, 2);
+            return make_token(TOKEN_NEWLINE, make_span(head, lexer->cur), leading);
         case '=':
             lexer_move(lexer, 1);
-            return make_token(TOKEN_EQUAL, head, lexer->cur, leading);
+            return make_token(TOKEN_EQUAL, make_span(head, lexer->cur), leading);
         case '[':
             lexer_move(lexer, 1);
-            return make_token(TOKEN_LBRACKET, head, lexer->cur, leading);
+            return make_token(TOKEN_LBRACKET, make_span(head, lexer->cur), leading);
         case ']':
             lexer_move(lexer, 1);
-            return make_token(TOKEN_RBRACKET, head, lexer->cur, leading);
+            return make_token(TOKEN_RBRACKET, make_span(head, lexer->cur), leading);
         case '"':
             return lexer_scan_str(lexer, leading);
         case '0': case '1': case '2': case '3': case '4': case '5':
@@ -309,7 +309,7 @@ typedef struct toml_node {
 } toml_node_s;
 
 static toml_node_s **create_index(toml_arena_s *arena, toml_node_s *head, size_t count) {
-    size_t size  = count * sizeof(toml_node_s *);
+    size_t size = count * sizeof(toml_node_s *);
     size_t align = ALIGNOF(toml_node_s *);
     toml_node_s **children = arena_alloc(arena, size, align);
     if (children == NULL) {
@@ -344,9 +344,17 @@ struct toml {
 
 static const toml_span_s EMPTY_SPAN = { 0 };
 
-static void make_error(toml_t *toml, toml_errcode_e code, toml_span_s primary, toml_span_s secondary) {
+static void make_error(toml_t *toml, toml_errcode_e code, toml_span_s primary) {
     toml->error = (toml_error_s){
         .code = code,
+        .primary = primary,
+        .secondary = EMPTY_SPAN,
+    };
+}
+
+static void make_dup_key_error(toml_t *toml, toml_span_s primary, toml_span_s secondary) {
+    toml->error = (toml_error_s){
+        .code = TOML_ERR_DUP_KEY,
         .primary = primary,
         .secondary = secondary,
     };
@@ -364,7 +372,7 @@ static toml_span_s parse_key(toml_t *toml, token_s token) {
         case TOKEN_FALSE:
             return token.text;
         default:
-            make_error(toml, TOML_ERR_SYNTAX, token.text, EMPTY_SPAN);
+            make_error(toml, TOML_ERR_SYNTAX, token.text);
             return EMPTY_SPAN;
     }
 }
@@ -387,7 +395,7 @@ static int64_t parse_s64_value(toml_span_s text) {
 static toml_node_s *parse_val(toml_t *toml, token_s token) {
     toml_node_s *node = arena_alloc(&toml->arena, sizeof *node, ALIGNOF(toml_node_s));
     if (node == NULL) {
-        make_error(toml, TOML_ERR_NOMEM, token.text, EMPTY_SPAN);
+        make_error(toml, TOML_ERR_NOMEM, token.text);
         return NULL;
     }
 
@@ -414,41 +422,56 @@ static toml_node_s *parse_val(toml_t *toml, token_s token) {
             node->val.b = false;
             return node;
         default:
-            make_error(toml, TOML_ERR_SYNTAX, token.text, EMPTY_SPAN);
+            make_error(toml, TOML_ERR_SYNTAX, token.text);
             return NULL;
     }
 }
 
-static toml_node_s *parse_keyval(toml_t *toml, lexer_s *lexer, token_s key_tok, const char *leading_start) {
-    toml_span_s key = parse_key(toml, key_tok);
-    if (toml_has_error(toml)) {
+typedef struct {
+    toml_t *toml;
+    lexer_s *lexer;
+} parser_s;
+
+static token_s expect_line_end(parser_s *parser) {
+    token_s token = lexer_next(parser->lexer);
+    if (token.type != TOKEN_NEWLINE && token.type != TOKEN_EOF) {
+        make_error(parser->toml, TOML_ERR_SYNTAX, token.text);
+    }
+
+    return token;
+}
+
+static void set_entry_spans(toml_node_s *node, const char *leading_start, toml_span_s content, token_s terminator_token) {
+    node->leading = make_span(leading_start, content.ptr);
+    node->text = content;
+    node->trailing = make_span(content.ptr + content.len, terminator_token.text.ptr + terminator_token.text.len);
+}
+
+static toml_node_s *parse_keyval(parser_s *parser, token_s key_token, const char *leading_start) {
+    toml_span_s key = parse_key(parser->toml, key_token);
+    if (toml_has_error(parser->toml)) {
         return NULL;
     }
 
-    token_s eq_tok = lexer_next(lexer);
-    if (eq_tok.type != TOKEN_EQUAL) {
-        make_error(toml, TOML_ERR_SYNTAX, eq_tok.text, EMPTY_SPAN);
+    token_s equal_token = lexer_next(parser->lexer);
+    if (equal_token.type != TOKEN_EQUAL) {
+        make_error(parser->toml, TOML_ERR_SYNTAX, equal_token.text);
         return NULL;
     }
 
-    token_s val_tok = lexer_next(lexer);
-    toml_node_s *node = parse_val(toml, val_tok);
+    token_s val_token = lexer_next(parser->lexer);
+    toml_node_s *node = parse_val(parser->toml, val_token);
     if (node == NULL) {
         return NULL;
     }
 
-    node->key = key;
-    node->leading = make_span(leading_start, key_tok.text.ptr);
-    node->text = make_span(key_tok.text.ptr, val_tok.text.ptr + val_tok.text.len);
-
-    token_s term_tok = lexer_next(lexer);
-    if (term_tok.type != TOKEN_NEWLINE && term_tok.type != TOKEN_EOF) {
-        make_error(toml, TOML_ERR_SYNTAX, term_tok.text, EMPTY_SPAN);
+    token_s terminator_token = expect_line_end(parser);
+    if (toml_has_error(parser->toml)) {
         return NULL;
     }
 
-    const char *text_end = node->text.ptr + node->text.len;
-    node->trailing = make_span(text_end, term_tok.text.ptr + term_tok.text.len);
+    node->key = key;
+    set_entry_spans(node, leading_start, make_span(key_token.text.ptr, val_token.text.ptr + val_token.text.len), terminator_token);
 
     return node;
 }
@@ -482,7 +505,7 @@ static const toml_node_s *find_duplicate(const toml_node_s *head, toml_span_s ke
 static bool finalize_table(toml_t *toml, node_list_s entries, toml_table_s *out) {
     toml_node_s **index = create_index(&toml->arena, entries.head, entries.count);
     if (index == NULL) {
-        make_error(toml, TOML_ERR_NOMEM, EMPTY_SPAN, EMPTY_SPAN);
+        make_error(toml, TOML_ERR_NOMEM, EMPTY_SPAN);
         return false;
     }
 
@@ -498,7 +521,7 @@ static toml_node_s *make_table_node(toml_t *toml, node_list_s entries) {
 
     toml_node_s *node = arena_alloc(&toml->arena, sizeof *node, ALIGNOF(toml_node_s));
     if (node == NULL) {
-        make_error(toml, TOML_ERR_NOMEM, EMPTY_SPAN, EMPTY_SPAN);
+        make_error(toml, TOML_ERR_NOMEM, EMPTY_SPAN);
         return NULL;
     }
 
@@ -506,49 +529,37 @@ static toml_node_s *make_table_node(toml_t *toml, node_list_s entries) {
     return node;
 }
 
-static toml_node_s *parse_table_header(toml_t *toml, lexer_s *lexer, node_list_s *root_entries, const char *leading_start, token_s lbracket_tok) {
-    toml_span_s name = parse_key(toml, lexer_next(lexer));
-    if (toml_has_error(toml)) {
+static toml_node_s *parse_table_header(parser_s *parser, const char *leading_start, token_s lbracket_token) {
+    toml_span_s name = parse_key(parser->toml, lexer_next(parser->lexer));
+    if (toml_has_error(parser->toml)) {
         return NULL;
     }
 
-    token_s close_token = lexer_next(lexer);
+    token_s close_token = lexer_next(parser->lexer);
     if (close_token.type != TOKEN_RBRACKET) {
-        make_error(toml, TOML_ERR_SYNTAX, close_token.text, EMPTY_SPAN);
+        make_error(parser->toml, TOML_ERR_SYNTAX, close_token.text);
         return NULL;
     }
 
-    token_s after_token = lexer_next(lexer);
-    if (after_token.type != TOKEN_NEWLINE && after_token.type != TOKEN_EOF) {
-        make_error(toml, TOML_ERR_SYNTAX, after_token.text, EMPTY_SPAN);
+    token_s terminator_token = expect_line_end(parser);
+    if (toml_has_error(parser->toml)) {
         return NULL;
     }
 
-    const toml_node_s *dup = find_duplicate(root_entries->head, name);
-    if (dup != NULL) {
-        make_error(toml, TOML_ERR_DUP_KEY, name, dup->key);
-        return NULL;
-    }
-
-    toml_node_s *table = arena_alloc(&toml->arena, sizeof *table, ALIGNOF(toml_node_s));
+    toml_node_s *table = arena_alloc(&parser->toml->arena, sizeof *table, ALIGNOF(toml_node_s));
     if (table == NULL) {
-        make_error(toml, TOML_ERR_NOMEM, EMPTY_SPAN, EMPTY_SPAN);
+        make_error(parser->toml, TOML_ERR_NOMEM, EMPTY_SPAN);
         return NULL;
     }
 
     *table = (toml_node_s){ .type = TOML_TABLE, .key = name };
-    table->leading = make_span(leading_start, lbracket_tok.text.ptr);
-    table->text = make_span(lbracket_tok.text.ptr, close_token.text.ptr + close_token.text.len);
-
-    const char *text_end = table->text.ptr + table->text.len;
-    table->trailing = make_span(text_end, after_token.text.ptr + after_token.text.len);
-
-    node_list_append(root_entries, table);
+    set_entry_spans(table, leading_start, make_span(lbracket_token.text.ptr, close_token.text.ptr + close_token.text.len), terminator_token);
 
     return table;
 }
 
 static toml_node_s *parse_toml(toml_t *toml, lexer_s *lexer) {
+    parser_s parser = { .toml = toml, .lexer = lexer };
     node_list_s root_entries = { 0 };
     node_list_s cur_entries = { 0 };
     toml_node_s *cur_table = NULL;  // NULL while collecting the root's own body
@@ -573,10 +584,19 @@ static toml_node_s *parse_toml(toml_t *toml, lexer_s *lexer) {
                 break;
             }
 
-            cur_table = parse_table_header(toml, lexer, &root_entries, pos, token);
-            if (cur_table == NULL) {
+            toml_node_s *table = parse_table_header(&parser, pos, token);
+            if (table == NULL) {
                 return NULL;
             }
+
+            const toml_node_s *table_dup = find_duplicate(root_entries.head, table->key);
+            if (table_dup != NULL) {
+                make_dup_key_error(toml, table->key, table_dup->key);
+                return NULL;
+            }
+
+            node_list_append(&root_entries, table);
+            cur_table = table;
 
             pos = cur_table->trailing.ptr + cur_table->trailing.len;
             cur_entries = (node_list_s){ 0 };
@@ -584,14 +604,14 @@ static toml_node_s *parse_toml(toml_t *toml, lexer_s *lexer) {
             continue;
         }
 
-        toml_node_s *entry = parse_keyval(toml, lexer, token, pos);
+        toml_node_s *entry = parse_keyval(&parser, token, pos);
         if (entry == NULL) {
             return NULL;
         }
 
         const toml_node_s *dup = find_duplicate(cur_entries.head, entry->key);
         if (dup != NULL) {
-            make_error(toml, TOML_ERR_DUP_KEY, entry->key, dup->key);
+            make_dup_key_error(toml, entry->key, dup->key);
             return NULL;
         }
 
@@ -608,18 +628,12 @@ static toml_node_s *parse_toml(toml_t *toml, lexer_s *lexer) {
 // TOML Serializer
 
 static char *emit_span(char *out, toml_span_s span) {
-    memcpy(out, span.ptr, span.len);
-    return out + span.len;
-}
-
-static char *serialize_node(char *out, const toml_node_s *node);
-
-static char *serialize_entries(char *out, toml_node_s * const *entries, size_t count) {
-    for (size_t i = 0; i < count; i++) {
-        out = serialize_node(out, entries[i]);
+    if (span.len == 0) {
+        return out;
     }
 
-    return out;
+    memcpy(out, span.ptr, span.len);
+    return out + span.len;
 }
 
 static char *serialize_node(char *out, const toml_node_s *node) {
@@ -628,7 +642,9 @@ static char *serialize_node(char *out, const toml_node_s *node) {
     out = emit_span(out, node->trailing);
 
     if (node->type == TOML_TABLE) {
-        out = serialize_entries(out, node->val.t.entries, node->val.t.count);
+        for (size_t i = 0; i < node->val.t.count; i++) {
+            out = serialize_node(out, node->val.t.entries[i]);
+        }
     }
 
     return out;
@@ -658,47 +674,53 @@ static bool is_all_digits(toml_span_s span) {
 }
 
 static bool next_segment(const char **cur, const char *end, toml_span_s *out, bool *out_quoted) {
-    const char *p = *cur;
+    const char *pivot = *cur;
 
-    if (p < end && *p == '"') {
-        p++;
-        const char *head = p;
-        while (p < end && *p != '"') {
-            p++;
+    if (pivot < end && *pivot == '"') {
+        pivot++;
+        const char *head = pivot;
+        while (pivot < end && *pivot != '"') {
+            pivot++;
         }
-        if (p == end) {
+        if (pivot == end) {
             return false;
         }
-        *out = make_span(head, p);
+        *out = make_span(head, pivot);
         *out_quoted = true;
-        p++;
+        pivot++;
     } else {
-        const char *head = p;
-        while (p < end && *p != '.') {
-            p++;
+        const char *head = pivot;
+        while (pivot < end && *pivot != '.') {
+            pivot++;
         }
-        if (p == head) {
+        if (pivot == head) {
             return false;
         }
-        *out = make_span(head, p);
+        *out = make_span(head, pivot);
         *out_quoted = false;
     }
 
-    if (p < end) {
-        if (*p != '.') {
+    if (pivot < end) {
+        if (*pivot != '.') {
             return false;
         }
-        p++;
-        if (p == end) {
+        pivot++;
+        if (pivot == end) {
             return false;
         }
     }
 
-    *cur = p;
+    *cur = pivot;
     return true;
 }
 
+static bool document_usable(const toml_t *toml) {
+    return toml != NULL && toml->root != NULL;
+}
+
 static const toml_node_s *seek_node(const toml_t *toml, const char *path) {
+    assert(document_usable(toml));
+
     const toml_node_s *node = toml->root;
     const char *cur = path;
     const char *end = path + strlen(path);
@@ -708,13 +730,13 @@ static const toml_node_s *seek_node(const toml_t *toml, const char *path) {
     }
 
     while (cur < end) {
-        toml_span_s seg;
+        toml_span_s segment;
         bool is_quoted;
-        if (!next_segment(&cur, end, &seg, &is_quoted)) {
+        if (!next_segment(&cur, end, &segment, &is_quoted)) {
             return NULL;
         }
 
-        if (!is_quoted && is_all_digits(seg)) {
+        if (!is_quoted && is_all_digits(segment)) {
             // Reserved for a future array index; no node ever matches
             return NULL;
         }
@@ -723,7 +745,7 @@ static const toml_node_s *seek_node(const toml_t *toml, const char *path) {
             return NULL;
         }
 
-        node = find_key(&node->val.t, seg);
+        node = find_key(&node->val.t, segment);
         if (node == NULL) {
             return NULL;
         }
@@ -732,16 +754,33 @@ static const toml_node_s *seek_node(const toml_t *toml, const char *path) {
     return node;
 }
 
-static bool document_usable(const toml_t *toml) {
-    return toml != NULL && toml->root != NULL;
-}
-
 static void clear_error(toml_t *toml) {
     toml->error = (toml_error_s){ .code = TOML_OK };
 }
 
+static const toml_node_s *seek_and_clear(const toml_t *toml, const char *path) {
+    if (!document_usable(toml)) {
+        return NULL;
+    }
+
+    const toml_node_s *node = seek_node(toml, path);
+    clear_error((toml_t *)toml);
+
+    return node;
+}
+
+static const toml_node_s *seek_typed(const toml_t *toml, const char *path, toml_type_e expected) {
+    const toml_node_s *node = seek_and_clear(toml, path);
+    if (node == NULL || node->type == expected) {
+        return node;
+    }
+
+    make_error((toml_t *)toml, TOML_ERR_TYPE, node->key);
+    return NULL;
+}
+
 static const char *materialize_cstr(toml_t *toml, toml_span_s raw) {
-    char *buf = arena_alloc(&toml->arena, raw.len + 1, 1);
+    char *buf = arena_alloc(&toml->arena, raw.len + 1, ALIGNOF(char));
     if (buf == NULL) {
         return NULL;
     }
@@ -770,7 +809,7 @@ toml_t *toml_from_byte(const char *byte, size_t byte_len) {
         return NULL;
     }
 
-    char *copy = arena_alloc(&arena, byte_len + 1, 1);
+    char *copy = arena_alloc(&arena, byte_len + 1, ALIGNOF(char));
     if (copy == NULL) {
         free(chunk);
         return NULL;
@@ -795,7 +834,7 @@ size_t toml_to_byte(const toml_t *toml, char *out) {
         return 0;
     }
 
-    char *tail = serialize_entries(out, toml->root->val.t.entries, toml->root->val.t.count);
+    char *tail = serialize_node(out, toml->root);
     tail = emit_span(tail, toml->trailing);
 
     clear_error((toml_t *)toml);
@@ -847,96 +886,40 @@ void toml_err_print(const toml_t *toml) {
 }
 
 bool toml_has(const toml_t *toml, const char *path) {
-    if (!document_usable(toml)) {
-        return false;
-    }
-
-    const toml_node_s *node = seek_node(toml, path);
-    clear_error((toml_t *)toml);
-
-    return node != NULL;
+    return seek_and_clear(toml, path) != NULL;
 }
 
 toml_type_e toml_type(const toml_t *toml, const char *path) {
-    if (!document_usable(toml)) {
-        return TOML_UNKNOWN;
-    }
-
-    const toml_node_s *node = seek_node(toml, path);
-    clear_error((toml_t *)toml);
+    const toml_node_s *node = seek_and_clear(toml, path);
 
     return (node == NULL) ? TOML_UNKNOWN : node->type;
 }
 
 int64_t toml_get_s64_or(const toml_t *toml, const char *path, int64_t def_val) {
-    if (!document_usable(toml)) {
-        return def_val;
-    }
+    const toml_node_s *node = seek_typed(toml, path, TOML_S64);
 
-    toml_t *mut = (toml_t *)toml;
-    const toml_node_s *node = seek_node(toml, path);
-
-    if (node == NULL) {
-        clear_error(mut);
-        return def_val;
-    }
-
-    if (node->type != TOML_S64) {
-        make_error(mut, TOML_ERR_TYPE, node->key, EMPTY_SPAN);
-        return def_val;
-    }
-
-    clear_error(mut);
-    return node->val.s64;
+    return (node == NULL) ? def_val : node->val.s64;
 }
 
 bool toml_get_bool_or(const toml_t *toml, const char *path, bool def_val) {
-    if (!document_usable(toml)) {
-        return def_val;
-    }
+    const toml_node_s *node = seek_typed(toml, path, TOML_BOOL);
 
-    toml_t *mut = (toml_t *)toml;
-    const toml_node_s *node = seek_node(toml, path);
-
-    if (node == NULL) {
-        clear_error(mut);
-        return def_val;
-    }
-
-    if (node->type != TOML_BOOL) {
-        make_error(mut, TOML_ERR_TYPE, node->key, EMPTY_SPAN);
-        return def_val;
-    }
-
-    clear_error(mut);
-    return node->val.b;
+    return (node == NULL) ? def_val : node->val.b;
 }
 
 const char *toml_get_str(const toml_t *toml, const char *path) {
-    if (!document_usable(toml)) {
-        return NULL;
-    }
-
-    toml_t *mut = (toml_t *)toml;
-    const toml_node_s *node = seek_node(toml, path);
-
+    const toml_node_s *node = seek_typed(toml, path, TOML_STR);
     if (node == NULL) {
-        clear_error(mut);
         return NULL;
     }
 
-    if (node->type != TOML_STR) {
-        make_error(mut, TOML_ERR_TYPE, node->key, EMPTY_SPAN);
-        return NULL;
-    }
-
-    const char *str = materialize_cstr(mut, node->val.byte);
+    toml_t *mutable_toml = (toml_t *)toml;
+    const char *str = materialize_cstr(mutable_toml, node->val.byte);
     if (str == NULL) {
-        make_error(mut, TOML_ERR_NOMEM, node->key, EMPTY_SPAN);
+        make_error(mutable_toml, TOML_ERR_NOMEM, node->key);
         return NULL;
     }
 
-    clear_error(mut);
     return str;
 }
 

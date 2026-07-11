@@ -201,9 +201,10 @@ static void test_parse_val_rejects_unexpected_token(void) {
 static void test_parse_keyval(void) {
     toml_t *toml = toml_from_byte("", 0);
     lexer_s lexer = make_lexer("answer = 42");
-    token_s key_tok = lexer_next(&lexer);
+    parser_s parser = { .toml = toml, .lexer = &lexer };
+    token_s key_token = lexer_next(&lexer);
 
-    toml_node_s *node = parse_keyval(toml, &lexer, key_tok, key_tok.text.ptr);
+    toml_node_s *node = parse_keyval(&parser, key_token, key_token.text.ptr);
 
     EXPECT(node != NULL);
     EXPECT(span_eq(node->key, "answer"));
@@ -216,9 +217,10 @@ static void test_parse_keyval(void) {
 static void test_parse_keyval_missing_equal_is_syntax_error(void) {
     toml_t *toml = toml_from_byte("", 0);
     lexer_s lexer = make_lexer("answer 42");
-    token_s key_tok = lexer_next(&lexer);
+    parser_s parser = { .toml = toml, .lexer = &lexer };
+    token_s key_token = lexer_next(&lexer);
 
-    toml_node_s *node = parse_keyval(toml, &lexer, key_tok, key_tok.text.ptr);
+    toml_node_s *node = parse_keyval(&parser, key_token, key_token.text.ptr);
 
     EXPECT(node == NULL);
     EXPECT(toml_has_error(toml) == true);
@@ -231,9 +233,10 @@ static void test_parse_keyval_spans_stitch_leading_text_trailing(void) {
     toml_t *toml = toml_from_byte("", 0);
     const char *source = "   answer = 42 # note\n";
     lexer_s lexer = make_lexer(source);
-    token_s key_tok = lexer_next(&lexer);
+    parser_s parser = { .toml = toml, .lexer = &lexer };
+    token_s key_token = lexer_next(&lexer);
 
-    toml_node_s *node = parse_keyval(toml, &lexer, key_tok, source);
+    toml_node_s *node = parse_keyval(&parser, key_token, source);
 
     EXPECT(node != NULL);
     EXPECT(node->leading.ptr == source);
@@ -248,10 +251,10 @@ static void test_parse_table_header_spans_stitch_leading_text_trailing(void) {
     toml_t *toml = toml_from_byte("", 0);
     const char *source = "[server] # note\n";
     lexer_s lexer = make_lexer(source);
-    token_s lbracket_tok = lexer_next(&lexer);
-    node_list_s root_entries = { 0 };
+    parser_s parser = { .toml = toml, .lexer = &lexer };
+    token_s lbracket_token = lexer_next(&lexer);
 
-    toml_node_s *table = parse_table_header(toml, &lexer, &root_entries, source, lbracket_tok);
+    toml_node_s *table = parse_table_header(&parser, source, lbracket_token);
 
     EXPECT(table != NULL);
     EXPECT(table->leading.ptr == source);
